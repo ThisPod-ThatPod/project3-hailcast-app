@@ -5,3 +5,4 @@ venv/
 .env
 *.pkl
 data/
+ml/learning_curve.png
