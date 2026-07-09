@@ -1,6 +1,0 @@
-lightgbm
-pandas
-boto3
-SQLAlchemy
-psycopg2-binary
-pydantic-settings

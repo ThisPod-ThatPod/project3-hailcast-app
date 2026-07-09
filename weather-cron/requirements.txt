@@ -1,6 +1,1 @@
 fastapi
-uvicorn[standard]
-pydantic-settings
-httpx
-SQLAlchemy
-psycopg2-binary
