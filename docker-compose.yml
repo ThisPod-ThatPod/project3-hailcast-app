@@ -1,0 +1,167 @@
+# 로컬 통합 실행 — Simulator/Frontend 없이 파이프라인 검증용
+# 사용: docker compose up --build
+# (운영 배포는 기존 원칙대로 빌드→ECR push→EKS pull, 이 파일은 로컬 전용)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hailcast
+      POSTGRES_USER: hailcast
+      POSTGRES_PASSWORD: hailcast
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hailcast"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: sqs,s3
+      DEFAULT_REGION: ap-northeast-2
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"sqs\": *\"\\(running\\|available\\)\"'"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  call-api:
+    build:
+      context: .
+      dockerfile: call-api/Dockerfile
+    environment: &app-env
+      AWS_REGION: ap-northeast-2
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SQS_QUEUE_NAME: hailcast-call-queue
+      SQS_AUTO_CREATE_QUEUE: "true"   # LocalStack 전용 (운영은 IaC가 큐 생성)
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: hailcast
+      DB_USER: hailcast
+      DB_PASSWORD: hailcast
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  simulator:
+    build:
+      context: .
+      dockerfile: simulator/Dockerfile
+    environment:
+      CALL_API_URL: http://call-api:8000
+      TRAFFIC_STEP: "5"
+      MIN_TPS: "0"
+      MAX_TPS: "200"
+      GENERATOR_TICK_SECONDS: "0.2"
+      LOG_LEVEL: INFO
+    ports:
+      - "8001:8001"
+    depends_on:
+      - call-api
+
+  weather-cron:
+    build:
+      context: .
+      dockerfile: weather-cron/Dockerfile
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: hailcast
+      DB_USER: hailcast
+      DB_PASSWORD: hailcast
+      WEATHER_INTERVAL_SECONDS: "600"   # 10분 (로컬 테스트 시 짧게 조정 가능)
+      WEATHER_RETRY_COUNT: "3"
+      LOG_LEVEL: INFO
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  predict:
+    build:
+      context: .
+      dockerfile: predict/Dockerfile
+    environment: &predict-env
+      AWS_REGION: ap-northeast-2
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      S3_BUCKET: hailcast
+      S3_AUTO_CREATE_BUCKET: "true"   # LocalStack 전용
+      SQS_QUEUE_NAME: hailcast-call-queue
+      SQS_AUTO_CREATE_QUEUE: "true"   # LocalStack 전용 (dashboard/health 큐 조회)
+      SIMULATOR_URL: http://simulator:8001
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: hailcast
+      DB_USER: hailcast
+      DB_PASSWORD: hailcast
+      PREDICTION_INTERVAL_SECONDS: "1800"   # 30분 (로컬 테스트 시 짧게 조정)
+      PREDICTION_WINDOW_MINUTES: "60"
+      PREDICTION_HORIZON_STEPS: "3"
+      FORECAST_RETRY_COUNT: "3"
+      # --- Predictive Scaling (로컬: KEDA dry-run) ---
+      KEDA_ENABLED: "false"
+      SCALING_INTERVAL_SECONDS: "60"
+      SCALING_COOLDOWN_SECONDS: "300"
+      SCALING_RULES: "20:1,50:2,100:3,300:5,500:10"
+      SCALING_MIN_REPLICAS: "1"
+      SCALING_MAX_REPLICAS: "10"
+      LOG_LEVEL: INFO
+    ports:
+      - "8003:8003"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  # 오프라인 학습 (1회 실행): docker compose run --rm ml-train
+  ml-train:
+    build:
+      context: .
+      dockerfile: predict/Dockerfile
+    profiles: ["tools"]
+    environment:
+      <<: *predict-env
+      SERVICE_NAME: ml-train
+    command: ["python", "ml/train.py", "--bootstrap"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      <<: *app-env
+      SQS_LONG_POLL_SECONDS: "20"
+      SQS_VISIBILITY_TIMEOUT: "30"
+      SQS_BATCH_SIZE: "10"
+      SQS_RETRY_COUNT: "5"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
