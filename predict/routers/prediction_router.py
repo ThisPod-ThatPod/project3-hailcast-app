@@ -29,7 +29,6 @@ def latest(session: Session = Depends(get_db_session)) -> PredictionDocument:
         ),
         predictions=[
             PredictionItem(
-                zone_id=p.zone_id,
                 target_time=p.target_time,
                 predicted_demand=p.predicted_demand,
                 confidence=p.confidence,
@@ -41,18 +40,15 @@ def latest(session: Session = Depends(get_db_session)) -> PredictionDocument:
 
 @router.get("/history", response_model=list[PredictionItem])
 def history(
-    zone_id: str | None = Query(default=None),
     limit: int = Query(default=None, ge=1),
     session: Session = Depends(get_db_session),
 ) -> list[PredictionItem]:
     settings = get_settings()
     rows = PredictionRepository(session).get_history(
-        zone_id,
         limit=min(limit or settings.prediction_history_default_limit, settings.prediction_history_max_limit),
     )
     return [
         PredictionItem(
-            zone_id=p.zone_id,
             target_time=p.target_time,
             predicted_demand=p.predicted_demand,
             confidence=p.confidence,

@@ -6,3 +6,4 @@ venv/
 *.pkl
 data/
 ml/learning_curve.png
+docs/

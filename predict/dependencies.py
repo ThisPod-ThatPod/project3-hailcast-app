@@ -12,10 +12,13 @@ from common.db.database import Database
 from adapters.inmemory_keda_adapter import InMemoryKedaAdapter
 from adapters.keda_adapter import KedaAdapter
 from adapters.kubernetes_keda_adapter import KubernetesKedaAdapter
+from adapters.nyc_weather_adapter import NycWeatherAdapter
 from config import get_settings
 from ml_runtime.model_loader import ModelLoader
+from schedulers.backup_scheduler import BackupScheduler
 from schedulers.forecast_scheduler import ForecastScheduler
 from schedulers.scaling_scheduler import ScalingScheduler
+from services.pod_forecast_service import PodForecastService
 from services.prediction_reader import PredictionReader, S3PredictionReader
 from services.prediction_service import PredictionService
 from services.scaler_service import ScalerService
@@ -41,8 +44,16 @@ def get_model_loader() -> ModelLoader:
 
 
 @lru_cache
+def get_nyc_weather_adapter() -> NycWeatherAdapter:
+    settings = get_settings()
+    return NycWeatherAdapter(settings.nyc_weather_api_url, settings.nyc_weather_timeout_seconds)
+
+
+@lru_cache
 def get_prediction_service() -> PredictionService:
-    return PredictionService(get_model_loader(), get_s3_adapter(), get_database(), get_settings())
+    return PredictionService(
+        get_model_loader(), get_nyc_weather_adapter(), get_s3_adapter(), get_database(), get_settings()
+    )
 
 
 @lru_cache
@@ -70,7 +81,9 @@ def get_prediction_reader() -> PredictionReader:
 def get_keda_adapter() -> KedaAdapter:
     settings = get_settings()
     if settings.keda_enabled:
-        return KubernetesKedaAdapter(settings.keda_namespace, settings.keda_scaledobject_name)
+        return KubernetesKedaAdapter(
+            settings.keda_namespace, settings.keda_scaledobject_name, settings.worker_deployment_name
+        )
     # 로컬(docker-compose)·테스트: dry-run InMemory Adapter
     return InMemoryKedaAdapter(initial_replicas=settings.scaling_min_replicas)
 
@@ -101,6 +114,23 @@ def get_scaling_scheduler() -> ScalingScheduler:
     return ScalingScheduler(get_scaler_service(), get_settings().scaling_interval_seconds)
 
 
+# ---------- Pod 이력 백업 (Dashboard 예측-실제 파드 그래프) ----------
+@lru_cache
+def get_pod_forecast_service() -> PodForecastService:
+    return PodForecastService(
+        get_database(),
+        get_prediction_reader(),
+        get_decision_engine(),
+        get_keda_adapter(),
+        get_settings(),
+    )
+
+
+@lru_cache
+def get_backup_scheduler() -> BackupScheduler:
+    return BackupScheduler(get_pod_forecast_service(), get_settings().backup_interval_seconds)
+
+
 # ---------- Dashboard / Health ----------
 @lru_cache
 def get_sqs_adapter() -> SqsAdapter:
@@ -129,6 +159,6 @@ def get_health_service():
         get_database(),
         get_sqs_adapter(),
         get_s3_adapter(),
-        [get_forecast_scheduler(), get_scaling_scheduler()],
+        [get_forecast_scheduler(), get_scaling_scheduler(), get_backup_scheduler()],
         get_settings(),
     )

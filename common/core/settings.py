@@ -16,11 +16,11 @@ class BaseAppSettings(BaseSettings):
     aws_endpoint_url: str | None = None
 
     # --- SQS ---
-    sqs_queue_name: str = "hailcast-call-queue"
+    sqs_queue_name: str = "hailcast-dev-call-queue"
     sqs_queue_url: str | None = None  # 지정 시 GetQueueUrl 조회 생략
 
     # --- S3 (모델 아티팩트 / prediction.json) ---
-    s3_bucket: str = "hailcast"
+    s3_bucket: str = "hailcast-dev-model-artifacts"
 
     # --- Database (RDS/PostgreSQL) ---
     db_host: str = "localhost"

@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hailcast-predict
+  namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
 spec:
   replicas: 1   # forecast/scaling 스케줄러 중복 실행 방지 — 반드시 1
   selector:
@@ -11,10 +12,10 @@ spec:
     metadata:
       labels: { app: hailcast-predict }
     spec:
-      serviceAccountName: hailcast-predict   # IRSA(S3/SQS) + ScaledObject RBAC
+      serviceAccountName: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
       containers:
         - name: predict
-          image: <ECR>/hailcast-predict:latest
+          image: <ECR>/hailcast-dev-predict:latest
           ports: [{ containerPort: 8003 }]
           envFrom:
             - configMapRef: { name: hailcast-config }

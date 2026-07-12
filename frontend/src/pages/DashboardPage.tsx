@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import PodForecastChart from '../components/PodForecastChart'
+import TrafficHistoryChart from '../components/TrafficHistoryChart'
 
 // 백엔드 연동 지점. 요청/응답 형식은 frontend/BACKEND_INTEGRATION.md 참고.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -10,11 +11,7 @@ type DashboardStats = { pods: number; traffic: number; nodes: NodeUsage[] }
 const SLIDES = [
   {
     label: '트래픽 추이 그래프',
-    content: (
-      <div className="flex h-full items-center justify-center text-gray-400">
-        트래픽 추이 그래프 (자리표시자)
-      </div>
-    ),
+    content: <TrafficHistoryChart />,
   },
   {
     label: '시간대별 예측 파드 수 vs 실제 파드 수',

@@ -13,10 +13,13 @@ from common.models.dashboard import (
     DashboardSummary,
     PredictionSummary,
     ScalingSummary,
+    TrafficPoint,
     TrafficStatus,
     WeatherSummary,
     WorkerStatus,
 )
+
+from repositories.call_repository import CallRepository
 
 from config import PredictSettings
 from repositories.prediction_repository import PredictionRepository
@@ -165,6 +168,22 @@ class DashboardService:
             failed_total=failed_total,
             avg_process_latency_ms=round(avg_latency * 1000, 1) if avg_latency is not None else None,
         )
+
+    def traffic_history(self, minutes: int, bucket_seconds: int) -> list[TrafficPoint]:
+        """최근 minutes분간 call-api 수신 요청 수를 bucket_seconds 단위로 집계 (트래픽 추이 그래프)."""
+        since = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        with self._db.session_scope() as session:
+            buckets = CallRepository(session).traffic_history(since, bucket_seconds)
+
+        first_bucket_epoch = since.timestamp() - (since.timestamp() % bucket_seconds)
+        bucket_count = int(minutes * 60 / bucket_seconds) + 1
+        points = []
+        for i in range(bucket_count):
+            bucket = datetime.fromtimestamp(
+                first_bucket_epoch + i * bucket_seconds, tz=timezone.utc
+            )
+            points.append(TrafficPoint(timestamp=bucket, requests=buckets.get(bucket, 0)))
+        return points
 
     # ---------- Summary ----------
     def summary(self, overall_health: str) -> DashboardSummary:

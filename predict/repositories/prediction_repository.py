@@ -15,7 +15,6 @@ class PredictionRepository(BaseRepository):
             for item in document.predictions:
                 self._session.add(
                     Prediction(
-                        zone_id=item.zone_id,
                         target_time=item.target_time,
                         predicted_demand=item.predicted_demand,
                         confidence=item.confidence,
@@ -40,17 +39,15 @@ class PredictionRepository(BaseRepository):
             stmt = (
                 select(Prediction)
                 .where(Prediction.generated_at == generated_at)
-                .order_by(Prediction.target_time, Prediction.zone_id)
+                .order_by(Prediction.target_time)
             )
             return list(self._session.execute(stmt).scalars())
         except SQLAlchemyError as exc:
             raise self._wrap("select_prediction_batch", exc) from exc
 
-    def get_history(self, zone_id: str | None, limit: int) -> list[Prediction]:
+    def get_history(self, limit: int) -> list[Prediction]:
         try:
             stmt = select(Prediction).order_by(Prediction.generated_at.desc(), Prediction.target_time).limit(limit)
-            if zone_id:
-                stmt = stmt.where(Prediction.zone_id == zone_id)
             return list(self._session.execute(stmt).scalars())
         except SQLAlchemyError as exc:
             raise self._wrap("select_prediction_history", exc) from exc

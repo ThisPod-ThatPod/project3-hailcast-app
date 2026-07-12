@@ -28,7 +28,7 @@ LATEST_WEATHER_TIMESTAMP = "latest_weather_timestamp"
 PREDICTION_TOTAL = "prediction_total"
 PREDICTION_FAILURE_TOTAL = "prediction_failure_total"
 PREDICTION_DURATION_SECONDS = "prediction_duration_seconds"
-PREDICTION_LATEST_VALUE = "prediction_latest_value"
+PREDICTION_LATEST_VALUE = "predicted_taxi_demand"   # 네이밍규약서 §8 — KEDA/Prometheus 계약 지표명
 
 # Scaling 지표
 SCALING_TOTAL = "scaling_total"

@@ -8,7 +8,7 @@ class SimulatorStatus(BaseModel):
     """GET /simulator/status 응답 — Frontend 폴링용."""
 
     running: bool
-    status: str                     # IDLE | RUNNING | STOPPING
+    status: str                     # IDLE | RUNNING
     traffic_mode: str               # CONSTANT (향후 SCENARIO/BURST/PEAK 추가)
     current_tps: float
     task_id: str | None = None

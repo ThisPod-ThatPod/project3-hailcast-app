@@ -19,7 +19,6 @@ class TrafficMode(StrEnum):
 class GeneratorStatus(StrEnum):
     IDLE = "IDLE"
     RUNNING = "RUNNING"
-    STOPPING = "STOPPING"
 
 
 class SimulatorState:
@@ -36,9 +35,9 @@ class SimulatorState:
         self.running: bool = False
         self.status: GeneratorStatus = GeneratorStatus.IDLE
         self.traffic_mode: TrafficMode = TrafficMode.CONSTANT
-        self.task: asyncio.Task | None = None
         self.task_id: str | None = None
-        # 통계
+        # 통계 — k6가 직접 call-api를 두드리므로 Python 쪽에서는 더 이상 채워지지 않는다.
+        # 실제 트래픽 수치는 predict의 GET /dashboard/traffic-history(DB 기준)를 본다.
         self.generated_request_count: int = 0
         self.success_count: int = 0
         self.fail_count: int = 0
@@ -48,30 +47,24 @@ class SimulatorState:
         self._run_started_monotonic: float | None = None
         self._accumulated_runtime: float = 0.0
 
-    # ---------- Generator 수명주기 ----------
-    async def mark_started(self, task: asyncio.Task) -> str:
+    # ---------- k6 프로세스 수명주기 ----------
+    async def mark_started(self) -> str:
         async with self._lock:
             self.running = True
             self.status = GeneratorStatus.RUNNING
-            self.task = task
             self.task_id = str(uuid.uuid4())
             self.start_time = datetime.now(timezone.utc)
             self._run_started_monotonic = time.monotonic()
             metrics.increment(GENERATOR_RUNNING)  # Stub: gauge 대체
             return self.task_id
 
-    async def mark_stopping(self) -> None:
-        async with self._lock:
-            self.running = False
-            self.status = GeneratorStatus.STOPPING
-
     async def mark_stopped(self) -> None:
         async with self._lock:
             if self._run_started_monotonic is not None:
                 self._accumulated_runtime += time.monotonic() - self._run_started_monotonic
                 self._run_started_monotonic = None
+            self.running = False
             self.status = GeneratorStatus.IDLE
-            self.task = None
             self.task_id = None
 
     async def reset(self) -> None:

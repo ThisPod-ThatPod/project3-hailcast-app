@@ -92,16 +92,15 @@ class Weather(Base):
 
 
 class Prediction(Base):
-    """수요 예측 History — Dashboard 조회 및 실측(calls) 대비 정확도 분석용.
+    """수요 예측 History — Dashboard 조회용 (zone 없음, 뉴욕 날씨 기반 글로벌 수요 하나).
 
-    (zone_id, target_time)으로 calls/weather와 Join한다. 같은 target_time에 대해
-    여러 번 예측될 수 있으므로 generated_at으로 최신 배치를 식별한다.
+    target_time으로 조회한다. 같은 target_time에 대해 여러 번 예측될 수 있으므로
+    generated_at으로 최신 배치를 식별한다.
     """
 
     __tablename__ = "predictions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    zone_id: Mapped[str] = mapped_column(String(32), index=True)
     target_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     predicted_demand: Mapped[float] = mapped_column(Float)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -109,6 +108,29 @@ class Prediction(Base):
     model_version: Mapped[str] = mapped_column(String(64))
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PodReplicaHistory(Base):
+    """시간대별(정시 버킷) 파드 수 이력 — 예측치·실측치를 함께 저장 (Dashboard 그래프용).
+
+    BackupScheduler가 매 시간 정각 버킷에 predicted/actual을 스냅샷으로 남긴다.
+    구역 구분 없이 클러스터 전체 replica 수 기준(worker Deployment 1개).
+    """
+
+    __tablename__ = "pod_replica_history"
+    __table_args__ = (
+        UniqueConstraint("bucket_time", name="uq_pod_replica_bucket_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bucket_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    predicted_replicas: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    actual_replicas: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    model_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class ScalingEvent(Base):

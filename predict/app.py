@@ -14,7 +14,12 @@ from common.core.logger import configure_logging, get_logger
 from common.core.metrics import metrics
 
 from config import get_settings
-from dependencies import get_database, get_forecast_scheduler, get_scaling_scheduler
+from dependencies import (
+    get_backup_scheduler,
+    get_database,
+    get_forecast_scheduler,
+    get_scaling_scheduler,
+)
 from routers.dashboard_router import router as dashboard_router
 from routers.health_router import router as health_router
 from routers.prediction_router import router as prediction_router
@@ -28,7 +33,7 @@ logger = get_logger("predict")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_database().init_schema()
-    schedulers = [get_forecast_scheduler(), get_scaling_scheduler()]
+    schedulers = [get_forecast_scheduler(), get_scaling_scheduler(), get_backup_scheduler()]
     tasks = [
         asyncio.create_task(s.run_loop(), name=s.name) for s in schedulers
     ]

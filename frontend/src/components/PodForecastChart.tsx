@@ -12,26 +12,16 @@ import {
 } from 'recharts'
 
 const HOURS_HISTORY = 24 // 슬라이드로 거슬러 볼 수 있는 과거 시간 범위
-const HOURS_FORECAST = 5 // 한 번 동기화될 때 predict가 앞으로 예측하는 최대 시간 (팀 확정 전 가정치 — 바뀌면 여기만 수정)
-const SYNC_INTERVAL_HOURS = 4 // 백엔드가 0/4/8/12/16/20시마다 예측을 동기화할 예정
+const HOURS_FORECAST = 5 // predict가 한 번에 내다보는 미래 시간 (predict/config.py prediction_horizon_steps와 일치)
 const WINDOW_SIZE = 11 // 그래프에 한 번에 보이는 시간 폭 (기본값: 현재 기준 ±5시간)
 
 // 백엔드 연동 지점. 요청/응답 형식은 frontend/BACKEND_INTEGRATION.md 참고.
+// predict는 30분마다 계속 예측을 갱신한다(고정 동기화 시각 없음) — 과거/현재/미래 경계는 "정시" 하나뿐.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
-// 현재 "시" 정각으로 앵커를 고정한다 (분 단위가 섞이면 정각 기준인 동기화 시각과 막대가 어긋남).
+// 현재 "시" 정각으로 앵커를 고정한다 (분 단위가 섞이면 시간축 막대와 어긋남).
 const currentHour = new Date()
 currentHour.setMinutes(0, 0, 0)
-
-function floorToSyncHour(date: Date): Date {
-  const synced = new Date(date)
-  synced.setHours(Math.floor(date.getHours() / SYNC_INTERVAL_HOURS) * SYNC_INTERVAL_HOURS, 0, 0, 0)
-  return synced
-}
-
-const lastSync = floorToSyncHour(currentHour)
-const forecastEnd = new Date(lastSync.getTime() + HOURS_FORECAST * 3600_000)
-const lastSyncOffset = (lastSync.getTime() - currentHour.getTime()) / 3600_000
 
 type PodPoint = {
   offset: number
@@ -56,7 +46,7 @@ export default function PodForecastChart() {
   const [series, setSeries] = useState<PodPoint[]>(TIME_SKELETON)
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/dashboard/pod-forecast`)
+    fetch(`${API_BASE}/dashboard/pod-forecast?hours_history=${HOURS_HISTORY}&hours_forecast=${HOURS_FORECAST}`)
       .then((res) => res.json())
       .then((data: { timestamp: string; predicted?: number; actual?: number }[]) => {
         const byTime = new Map(data.map((d) => [d.timestamp, d]))
@@ -76,7 +66,7 @@ export default function PodForecastChart() {
     () => series.filter((d) => d.offset >= windowStart && d.offset < windowStart + WINDOW_SIZE),
     [series, windowStart],
   )
-  const syncPoint = visible.find((d) => d.offset === lastSyncOffset)
+  const nowPoint = visible.find((d) => d.offset === 0)
 
   return (
     <div className="flex h-full flex-col gap-2">
@@ -88,12 +78,12 @@ export default function PodForecastChart() {
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
             <Legend />
-            {syncPoint && (
+            {nowPoint && (
               <ReferenceLine
-                x={syncPoint.label}
+                x={nowPoint.label}
                 stroke="#6b7280"
                 strokeDasharray="4 4"
-                label={{ value: '최근 동기화', position: 'insideTopLeft', fontSize: 11, fill: '#6b7280' }}
+                label={{ value: '현재', position: 'insideTopLeft', fontSize: 11, fill: '#6b7280' }}
               />
             )}
             <Bar dataKey="예측파드수" fill="#a855f7" isAnimationActive={false} />

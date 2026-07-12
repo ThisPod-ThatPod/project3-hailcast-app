@@ -13,3 +13,7 @@ class KedaAdapter(ABC):
     @abstractmethod
     def patch_min_replicas(self, replicas: int) -> int:
         """minReplicaCount를 Patch하고 적용된 값을 반환한다."""
+
+    @abstractmethod
+    def get_actual_replicas(self) -> int:
+        """worker Deployment의 실제 가동 중인(ready) 파드 수 — KEDA의 반응형 확장까지 반영된 값."""

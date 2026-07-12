@@ -11,27 +11,49 @@ _PLURAL = "scaledobjects"
 
 
 class KubernetesKedaAdapter:
-    def __init__(self, namespace: str, scaledobject_name: str):
+    def __init__(self, namespace: str, scaledobject_name: str, deployment_name: str):
         self._namespace = namespace
         self._name = scaledobject_name
-        self._api = None  # lazy — 클러스터 밖에서 생성돼도 startup은 죽지 않는다
+        self._deployment_name = deployment_name
+        self._api = None       # CustomObjectsApi — lazy (클러스터 밖에서 생성돼도 startup은 죽지 않는다)
+        self._apps_api = None  # AppsV1Api — 실제 파드 수(status.readyReplicas) 조회용
+
+    def _load_kube_config(self) -> None:
+        from kubernetes import config as k8s_config
+
+        try:
+            k8s_config.load_incluster_config()   # Pod 내부 (ServiceAccount)
+        except Exception:
+            k8s_config.load_kube_config()        # 로컬 kubeconfig
 
     def _ensure_api(self):
         if self._api is not None:
             return self._api
         try:
-            from kubernetes import client, config as k8s_config
+            from kubernetes import client
 
-            try:
-                k8s_config.load_incluster_config()   # Pod 내부 (ServiceAccount)
-            except Exception:
-                k8s_config.load_kube_config()        # 로컬 kubeconfig
+            self._load_kube_config()
             self._api = client.CustomObjectsApi()
             return self._api
         except Exception as exc:
             raise KubernetesError(
                 f"kubernetes client init failed: {exc}",
                 detail={"scaledobject": self._name},
+            ) from exc
+
+    def _ensure_apps_api(self):
+        if self._apps_api is not None:
+            return self._apps_api
+        try:
+            from kubernetes import client
+
+            self._load_kube_config()
+            self._apps_api = client.AppsV1Api()
+            return self._apps_api
+        except Exception as exc:
+            raise KubernetesError(
+                f"kubernetes client init failed: {exc}",
+                detail={"deployment": self._deployment_name},
             ) from exc
 
     def get_min_replicas(self) -> int:
@@ -67,4 +89,23 @@ class KubernetesKedaAdapter:
             raise KubernetesError(
                 f"patch ScaledObject failed: {exc}",
                 detail={"scaledobject": self._name, "namespace": self._namespace},
+            ) from exc
+
+    def get_actual_replicas(self) -> int:
+        """worker Deployment의 실제 가동 중인 파드 수.
+
+        minReplicaCount(predict가 선제 patch한 하한선)와 달리, KEDA 자체의 SQS 트리거로
+        반응형 확장된 값까지 그대로 반영된 '진짜' 파드 수다.
+        """
+        try:
+            deployment = self._ensure_apps_api().read_namespaced_deployment(
+                self._deployment_name, self._namespace
+            )
+            return int(deployment.status.ready_replicas or 0)
+        except KubernetesError:
+            raise
+        except Exception as exc:
+            raise KubernetesError(
+                f"read Deployment status failed: {exc}",
+                detail={"deployment": self._deployment_name, "namespace": self._namespace},
             ) from exc

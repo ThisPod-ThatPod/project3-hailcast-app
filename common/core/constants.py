@@ -19,7 +19,6 @@ SOURCE_SIMULATOR = "simulator"
 
 # 서비스 구역 좌표 (zone_id → lat, lon)
 # Weather 수집·Forecast 예측·수요 집계가 같은 zone_id 키로 Join된다.
-# (simulator/services/request_generator.py의 구역과 동일 좌표)
 ZONE_COORDINATES: dict[str, tuple[float, float]] = {
     "gangnam": (37.4979, 127.0276),
     "hongdae": (37.5563, 126.9236),

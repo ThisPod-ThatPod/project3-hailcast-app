@@ -1,7 +1,7 @@
-# Predict용 Call Repository — 최근 수요(Call History) Feature 조회 전용
-from datetime import datetime, timedelta, timezone
+# Predict용 Call Repository — Dashboard 트래픽 그래프 조회 전용
+from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from common.db.base_repository import BaseRepository
@@ -9,29 +9,22 @@ from common.db.entities import Call
 
 
 class CallRepository(BaseRepository):
-    def _count_since(self, since: datetime) -> dict[str, int]:
-        stmt = (
-            select(Call.zone_id, func.count(Call.id))
-            .where(Call.requested_at >= since, Call.zone_id.isnot(None))
-            .group_by(Call.zone_id)
-        )
-        return {zone: count for zone, count in self._session.execute(stmt).all()}
+    def traffic_history(self, since: datetime, bucket_seconds: int) -> dict[datetime, int]:
+        """since 이후 call-api 수신 요청을 bucket_seconds 단위로 집계 (Dashboard 트래픽 그래프).
 
-    def recent_calls_by_zone(self) -> dict[str, dict]:
-        """구역별 {recent_calls_1h, recent_calls_3h, recent_calls_24h} feature."""
+        Call.enqueued_at(call-api 접수 시각) 기준 — call-api/worker 파드 수·트래픽 출처와
+        무관하게 DB 하나로 전체 합산된다. 버킷이 빈 구간은 결과에 포함되지 않는다(호출부에서 0 채움).
+        """
         try:
-            now = datetime.now(timezone.utc)
-            h1 = self._count_since(now - timedelta(hours=1))
-            h3 = self._count_since(now - timedelta(hours=3))
-            h24 = self._count_since(now - timedelta(hours=24))
-            zones = set(h1) | set(h3) | set(h24)
-            return {
-                zone: {
-                    "recent_calls_1h": h1.get(zone, 0),
-                    "recent_calls_3h": h3.get(zone, 0),
-                    "recent_calls_24h": h24.get(zone, 0),
-                }
-                for zone in zones
-            }
+            stmt = select(Call.enqueued_at).where(Call.enqueued_at >= since)
+            timestamps = self._session.execute(stmt).scalars().all()
         except SQLAlchemyError as exc:
-            raise self._wrap("select_recent_calls", exc) from exc
+            raise self._wrap("select_traffic_history", exc) from exc
+
+        buckets: dict[datetime, int] = {}
+        for ts in timestamps:
+            epoch = ts.timestamp()
+            bucket_epoch = epoch - (epoch % bucket_seconds)
+            bucket = datetime.fromtimestamp(bucket_epoch, tz=timezone.utc)
+            buckets[bucket] = buckets.get(bucket, 0) + 1
+        return buckets

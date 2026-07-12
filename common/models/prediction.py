@@ -5,9 +5,8 @@ from pydantic import BaseModel, Field
 
 
 class PredictionItem(BaseModel):
-    """구역 × 시간창 1건의 예측."""
+    """시간창 1건의 예측 (zone 없음 — 뉴욕 날씨 기반 글로벌 수요 하나)."""
 
-    zone_id: str
     target_time: datetime           # 이 시각부터 window 동안의 수요 예측
     predicted_demand: float = Field(..., ge=0)
     confidence: float | None = Field(default=None, ge=0, le=1)
@@ -23,7 +22,7 @@ class PredictionDocument(BaseModel):
     model_version: str
     prediction_window_minutes: int
     horizon_steps: int              # 몇 개의 시간창을 예측했는지
-    total_predicted_demand: float   # 첫 번째 시간창의 전 구역 합계 (KEDA 스케일 기준값)
+    total_predicted_demand: float   # 첫 번째 시간창의 예측값 (KEDA 스케일 기준값)
     predictions: list[PredictionItem]
 
 

@@ -19,7 +19,7 @@ LEARNING_CURVE_PATH = Path(__file__).parent / "learning_curve8.png"
 VALID_RATIO = 0.15
 
 LGBM_PARAMS = dict(
-    # 실험번호 8번 채택
+
     objective="regression",
     boosting_type="gbdt",
     n_estimators=8000,

@@ -21,3 +21,7 @@ class InMemoryKedaAdapter(KedaAdapter):
             extra={"event": "patch_success", "count": replicas},
         )
         return self._replicas
+
+    def get_actual_replicas(self) -> int:
+        # 로컬(K8s 없음)에서는 실제 파드 수 개념이 없으므로 minReplicaCount와 동일하게 취급한다.
+        return self._replicas

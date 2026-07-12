@@ -12,11 +12,15 @@ class PredictSettings(BaseAppSettings):
 
     # --- Prediction ---
     prediction_window_minutes: int = 60   # 예측 시간창 크기
-    prediction_horizon_steps: int = 3     # 몇 개의 시간창을 예측할지 (60분 × 3 = 3시간)
+    prediction_horizon_steps: int = 5     # 몇 개의 시간창을 예측할지 (60분 × 5 = 5시간, 프론트 HOURS_FORECAST와 일치)
 
     # --- Model (S3) ---
-    model_s3_prefix: str = "models"       # models/latest/{model.txt, metadata.json}
+    model_s3_prefix: str = "models"       # models/latest/{model.pkl, metadata.json}
     model_cache_dir: str = "/tmp/hailcast-models"
+
+    # --- 날씨 입력 (Open-Meteo, 뉴욕 고정 — ml/train.py 학습 데이터와 동일 분포) ---
+    nyc_weather_api_url: str = "https://api.open-meteo.com/v1/forecast"
+    nyc_weather_timeout_seconds: float = 10.0
 
     # --- Prediction Output (S3) ---
     prediction_s3_prefix: str = "predictions"   # predictions/latest.json + 이력
@@ -46,8 +50,12 @@ class PredictSettings(BaseAppSettings):
     scaling_history_default_limit: int = 50
     # --- KEDA ---
     keda_enabled: bool = False                    # false: InMemory(dry-run) Adapter (로컬/테스트)
-    keda_namespace: str = "default"
+    keda_namespace: str = "hailcast"   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
     keda_scaledobject_name: str = "hailcast-worker-scaler"
+    worker_deployment_name: str = "hailcast-worker"   # 실제 파드 수(status.readyReplicas) 조회 대상
+
+    # --- Pod 이력 백업 (Dashboard 예측-실제 파드 그래프) ---
+    backup_interval_seconds: float = 3600.0   # 정시 버킷 스냅샷 주기 (1시간)
 
     # --- Dashboard / Health ---
     simulator_url: str = "http://localhost:8001"  # Traffic 위젯 프록시 대상

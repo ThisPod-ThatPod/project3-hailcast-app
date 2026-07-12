@@ -60,6 +60,30 @@ class WorkerStatus(BaseModel):
     avg_process_latency_ms: float | None = None   # enqueued→processed 평균 (최근 5분)
 
 
+class TrafficPoint(BaseModel):
+    """GET /dashboard/traffic-history — 시간 버킷별 call-api 수신 요청 수 1개 점.
+
+    Call.enqueued_at(= call-api가 접수해 SQS에 발행한 시각) 기준 집계라 call-api/worker
+    파드가 몇 개든, 트래픽이 simulator든 k6든 출처와 무관하게 DB에서 그대로 잡힌다.
+    """
+
+    timestamp: datetime
+    requests: int
+
+
+class PodForecastPoint(BaseModel):
+    """GET /dashboard/pod-forecast — 시간대별 예측 파드 수 vs 실제 파드 수 1개 점.
+
+    과거(bucket_time < 현재 정시)는 PodReplicaHistory 백업 이력에서, 현재·미래는
+    실시간 예측 파일(S3 predictions/latest.json)에서 값을 채운다. actual은 과거·현재만
+    존재하고 미래는 항상 None이다.
+    """
+
+    timestamp: datetime
+    predicted: int | None = None
+    actual: int | None = None
+
+
 class DashboardSummary(BaseModel):
     """GET /dashboard/summary — 시스템 전체 상태."""
 
