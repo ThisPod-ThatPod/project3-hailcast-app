@@ -24,7 +24,11 @@ def latest(session: Session = Depends(get_db_session)) -> PredictionDocument:
         model_version=batch[0].model_version,
         prediction_window_minutes=batch[0].prediction_window_minutes,
         horizon_steps=len({p.target_time for p in batch}),
-        total_predicted_demand=round(
+        # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
+        # total_predicted_demand=round(
+        #     sum(p.predicted_demand for p in batch if p.target_time == first_target), 2
+        # ),
+        predicted_taxi_demand=round(
             sum(p.predicted_demand for p in batch if p.target_time == first_target), 2
         ),
         predictions=[

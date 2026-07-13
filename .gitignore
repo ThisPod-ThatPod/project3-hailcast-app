@@ -5,3 +5,4 @@ venv/
 .env
 *.pkl
 data/
+.claude/

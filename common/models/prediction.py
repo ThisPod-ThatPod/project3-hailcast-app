@@ -16,14 +16,16 @@ class PredictionItem(BaseModel):
 class PredictionDocument(BaseModel):
     """prediction.json 스키마 — S3 predictions/latest.json 으로 업로드된다.
 
-    KEDA는 total_predicted_demand(스칼라)를, Dashboard/Grafana는 predictions(상세)를 사용한다.
+    KEDA는 predicted_taxi_demand(스칼라)를, Dashboard/Grafana는 predictions(상세)를 사용한다.
     """
 
     generated_at: datetime
     model_version: str
     prediction_window_minutes: int
     horizon_steps: int              # 몇 개의 시간창을 예측했는지
-    total_predicted_demand: float   # 첫 번째 시간창의 전 구역 합계 (KEDA 스케일 기준값)
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
+    # total_predicted_demand: float   # 첫 번째 시간창의 전 구역 합계 (KEDA 스케일 기준값)
+    predicted_taxi_demand: float    # 첫 번째 시간창의 전 구역 합계 (KEDA 스케일 기준값)
     predictions: list[PredictionItem]
 
 
