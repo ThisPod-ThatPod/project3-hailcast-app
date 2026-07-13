@@ -12,11 +12,10 @@ import {
 } from 'recharts'
 
 const HOURS_HISTORY = 24 // 슬라이드로 거슬러 볼 수 있는 과거 시간 범위
-const HOURS_FORECAST = 5 // predict가 한 번에 내다보는 미래 시간 (predict/config.py prediction_horizon_steps와 일치)
+const HOURS_FORECAST = 4 // predict가 한 번에 내다보는 미래 시간 (predict/config.py prediction_horizon_hours와 일치)
 const WINDOW_SIZE = 11 // 그래프에 한 번에 보이는 시간 폭 (기본값: 현재 기준 ±5시간)
 
-// 백엔드 연동 지점. 요청/응답 형식은 frontend/BACKEND_INTEGRATION.md 참고.
-// predict는 30분마다 계속 예측을 갱신한다(고정 동기화 시각 없음) — 과거/현재/미래 경계는 "정시" 하나뿐.
+// 백엔드 연동 지점 — predict는 00:03부터 4시간마다 예측을 갱신한다 — 과거/현재/미래 경계는 "정시" 하나뿐.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 // 현재 "시" 정각으로 앵커를 고정한다 (분 단위가 섞이면 시간축 막대와 어긋남).
@@ -47,12 +46,14 @@ export default function PodForecastChart() {
 
   useEffect(() => {
     fetch(`${API_BASE}/dashboard/pod-forecast?hours_history=${HOURS_HISTORY}&hours_forecast=${HOURS_FORECAST}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data: { timestamp: string; predicted?: number; actual?: number }[]) => {
-        const byTime = new Map(data.map((d) => [d.timestamp, d]))
+        // 문자열 그대로 비교하지 않는다 — 백엔드(밀리초 없음)와 JS Date.toISOString()(밀리초 포함)의
+        // ISO 포맷이 달라서 문자열 매칭이 항상 실패한다. 실제 시각(epoch)으로 비교한다.
+        const byTime = new Map(data.map((d) => [new Date(d.timestamp).getTime(), d]))
         setSeries(
           TIME_SKELETON.map((point) => {
-            const match = byTime.get(point.timestamp)
+            const match = byTime.get(new Date(point.timestamp).getTime())
             return { ...point, 예측파드수: match?.predicted, 실제파드수: match?.actual }
           }),
         )

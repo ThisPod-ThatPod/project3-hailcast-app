@@ -32,7 +32,7 @@ services:
   call-api:
     build:
       context: .
-      dockerfile: call-api/Dockerfile
+      dockerfile: backend/call-api/Dockerfile
     environment: &app-env
       AWS_REGION: ap-northeast-2
       AWS_ENDPOINT_URL: http://localstack:4566
@@ -57,7 +57,7 @@ services:
   simulator:
     build:
       context: .
-      dockerfile: simulator/Dockerfile
+      dockerfile: backend/simulator/Dockerfile
     environment:
       CALL_API_URL: http://call-api:8000
       TRAFFIC_STEP: "5"
@@ -73,7 +73,7 @@ services:
   weather-cron:
     build:
       context: .
-      dockerfile: weather-cron/Dockerfile
+      dockerfile: backend/weather-cron/Dockerfile
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -92,7 +92,7 @@ services:
   predict:
     build:
       context: .
-      dockerfile: predict/Dockerfile
+      dockerfile: backend/predict/Dockerfile
     environment: &predict-env
       AWS_REGION: ap-northeast-2
       AWS_ENDPOINT_URL: http://localstack:4566
@@ -140,7 +140,7 @@ services:
   ml-train:
     build:
       context: .
-      dockerfile: predict/Dockerfile
+      dockerfile: backend/predict/Dockerfile
     profiles: ["tools"]
     environment:
       <<: *predict-env
@@ -155,7 +155,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: worker/Dockerfile
+      dockerfile: backend/worker/Dockerfile
     environment:
       <<: *app-env
       SQS_LONG_POLL_SECONDS: "20"

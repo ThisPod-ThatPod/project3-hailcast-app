@@ -9,9 +9,8 @@ import {
   YAxis,
 } from 'recharts'
 
-// 백엔드 연동 지점. 요청/응답 형식은 frontend/BACKEND_INTEGRATION.md 참고.
-// call-api가 받은 요청을 Call.enqueued_at 기준으로 집계한 값이라, k6든 시뮬레이터든
-// 트래픽 출처와 무관하게, call-api/worker 파드가 몇 개든 DB 하나로 합산되어 나온다.
+// 백엔드 연동 지점 — predict가 call-api 각 파드의 10초 단위 shard(FileStore)를 모아
+// 집계한 값이라, k6든 시뮬레이터든 트래픽 출처·call-api 파드 수와 무관하게 합산되어 나온다.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 const WINDOW_MINUTES = 10   // 최근 몇 분을 보여줄지
@@ -36,7 +35,7 @@ export default function TrafficHistoryChart() {
       fetch(
         `${API_BASE}/dashboard/traffic-history?minutes=${WINDOW_MINUTES}&bucket_seconds=${BUCKET_SECONDS}`,
       )
-        .then((res) => res.json())
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
         .then((data: TrafficPoint[]) => {
           if (cancelled) return
           setSeries(data.map((d) => ({ label: formatLabel(d.timestamp), requests: d.requests })))

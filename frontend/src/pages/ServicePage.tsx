@@ -1,16 +1,22 @@
 import { useState } from 'react'
 
-// 백엔드 연동 지점. 요청/응답 형식은 frontend/BACKEND_INTEGRATION.md 참고.
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+// 백엔드 연동 지점 — call-api. backend/common/models/call.py::CallRequest와 같은 모양
+// (pickup/destination은 좌표가 아니라 표시용 텍스트, B1 — 모델이 위치를 안 쓰기 때문).
+const CALL_API_BASE = import.meta.env.VITE_CALL_API_BASE_URL ?? 'http://localhost:8000'
 
 export default function ServicePage() {
   const [destination, setDestination] = useState('')
 
   const handleCall = () => {
-    fetch(`${API_BASE}/api/call`, {
+    fetch(`${CALL_API_BASE}/call`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pickup: 'current_location', destination }),
+      body: JSON.stringify({
+        user_id: 'service-page-user',
+        pickup: '현재위치',
+        destination,
+        source: 'api',
+      }),
     }).catch(() => {
       // 백엔드 미연결 상태 — 콘솔에 요청 실패가 보이는 게 정상.
     })

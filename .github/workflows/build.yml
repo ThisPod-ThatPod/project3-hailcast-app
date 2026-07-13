@@ -38,7 +38,7 @@ jobs:
           IMAGE: hailcast-dev-${{ matrix.service }}
         run: |
           # build context = 레포 루트 (common/·ml/ 공유 모듈 COPY)
-          docker build -f ${{ matrix.service }}/Dockerfile \
+          docker build -f backend/${{ matrix.service }}/Dockerfile \
             -t "$REGISTRY/$IMAGE:${GITHUB_SHA::7}" \
             -t "$REGISTRY/$IMAGE:latest" .
           docker push "$REGISTRY/$IMAGE:${GITHUB_SHA::7}"
