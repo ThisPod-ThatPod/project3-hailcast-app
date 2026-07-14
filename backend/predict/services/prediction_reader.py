@@ -40,7 +40,6 @@ class FilePredictionReader(PredictionReader):
             return None
         logger.info(
             # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-            # f"prediction loaded (total={document.total_predicted_demand})",
             f"prediction loaded (total={document.predicted_taxi_demand})",
             extra={
                 "event": "prediction_loaded",

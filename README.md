@@ -75,7 +75,7 @@ curl localhost:8003/dashboard/summary            # 전체 상태 한 번에
 
 S3 latest 모델 로드(버전 캐시, 재학습 자동 반영) → 구역별 최신 날씨+최근 콜(1h/3h/24h) →
 `ml/features.py` 공유 피처 17개(train-serve skew 방지) → LightGBM → 9구역×3시간창 예측 →
-S3 `predictions/latest.json` + RDS history. `total_predicted_demand`가 Scaling 기준값.
+S3 `predictions/latest.json`. `predicted_taxi_demand`가 Scaling 기준값.
 
 ## Predictive Scaling
 
