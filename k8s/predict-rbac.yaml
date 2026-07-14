@@ -3,6 +3,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: hailcast-scaledobject-patcher
+  # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
   namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
 rules:
   - apiGroups: ["keda.sh"]
@@ -16,10 +17,13 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: hailcast-predict-scaledobject
+  # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
   namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
 subjects:
   - kind: ServiceAccount
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 3. ServiceAccount 이름 어긋남
     name: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
     namespace: hailcast
 roleRef:
   kind: Role

@@ -16,10 +16,13 @@ class BaseAppSettings(BaseSettings):
     aws_endpoint_url: str | None = None
 
     # --- SQS ---
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-1. SQS Queue 이름에 dev 누락
     sqs_queue_name: str = "hailcast-dev-call-queue"
     sqs_queue_url: str | None = None  # 지정 시 GetQueueUrl 조회 생략
 
     # --- S3 (모델 아티팩트 / prediction.json / JSON 상태 동기화) ---
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-4. S3 버킷 기본값 규약 정렬
+    # (실제 버킷은 랜덤 접미사 포함 — 운영에서는 S3_BUCKET env로 주입, 규약 §5-2)
     s3_bucket: str = "hailcast-dev-model-artifacts"
 
     # --- CORS (프론트가 다른 origin/포트에서 호출) ---
