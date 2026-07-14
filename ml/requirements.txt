@@ -1,6 +1,10 @@
-lightgbm
+#ml
 pandas
+requests
+lightgbm
+scikit-learn
+joblib
 boto3
-SQLAlchemy
-psycopg2-binary
-pydantic-settings
+matplotlib
+optuna
+optuna-integration[lightgbm]

@@ -32,13 +32,13 @@ services:
   call-api:
     build:
       context: .
-      dockerfile: call-api/Dockerfile
+      dockerfile: backend/call-api/Dockerfile
     environment: &app-env
       AWS_REGION: ap-northeast-2
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SQS_QUEUE_NAME: hailcast-call-queue
+      SQS_QUEUE_NAME: hailcast-dev-call-queue
       SQS_AUTO_CREATE_QUEUE: "true"   # LocalStack 전용 (운영은 IaC가 큐 생성)
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -57,7 +57,7 @@ services:
   simulator:
     build:
       context: .
-      dockerfile: simulator/Dockerfile
+      dockerfile: backend/simulator/Dockerfile
     environment:
       CALL_API_URL: http://call-api:8000
       TRAFFIC_STEP: "5"
@@ -73,7 +73,7 @@ services:
   weather-cron:
     build:
       context: .
-      dockerfile: weather-cron/Dockerfile
+      dockerfile: backend/weather-cron/Dockerfile
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -92,15 +92,15 @@ services:
   predict:
     build:
       context: .
-      dockerfile: predict/Dockerfile
+      dockerfile: backend/predict/Dockerfile
     environment: &predict-env
       AWS_REGION: ap-northeast-2
       AWS_ENDPOINT_URL: http://localstack:4566
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      S3_BUCKET: hailcast
+      S3_BUCKET: hailcast-dev-model-artifacts
       S3_AUTO_CREATE_BUCKET: "true"   # LocalStack 전용
-      SQS_QUEUE_NAME: hailcast-call-queue
+      SQS_QUEUE_NAME: hailcast-dev-call-queue
       SQS_AUTO_CREATE_QUEUE: "true"   # LocalStack 전용 (dashboard/health 큐 조회)
       SIMULATOR_URL: http://simulator:8001
       DB_HOST: postgres
@@ -119,6 +119,8 @@ services:
       SCALING_RULES: "20:1,50:2,100:3,300:5,500:10"
       SCALING_MIN_REPLICAS: "1"
       SCALING_MAX_REPLICAS: "10"
+      # --- Pod 이력 백업 (로컬 테스트: 1시간 대신 3분 주기로 짧게) ---
+      BACKUP_INTERVAL_SECONDS: "180"
       LOG_LEVEL: INFO
     ports:
       - "8003:8003"
@@ -138,7 +140,7 @@ services:
   ml-train:
     build:
       context: .
-      dockerfile: predict/Dockerfile
+      dockerfile: backend/predict/Dockerfile
     profiles: ["tools"]
     environment:
       <<: *predict-env
@@ -153,7 +155,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: worker/Dockerfile
+      dockerfile: backend/worker/Dockerfile
     environment:
       <<: *app-env
       SQS_LONG_POLL_SECONDS: "20"

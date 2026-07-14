@@ -3,18 +3,24 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: hailcast-scaledobject-patcher
+  namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
 rules:
   - apiGroups: ["keda.sh"]
     resources: ["scaledobjects"]
     verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]   # worker Deployment의 실제 파드 수(status.readyReplicas) 조회용
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: hailcast-predict-scaledobject
+  namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
 subjects:
   - kind: ServiceAccount
-    name: hailcast-predict
+    name: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
+    namespace: hailcast
 roleRef:
   kind: Role
   name: hailcast-scaledobject-patcher

@@ -25,7 +25,7 @@
 
 ```bash
 # 1) 이미지 빌드·푸시 (CI: .github/workflows/build.yml, build context = 레포 루트)
-docker build -f predict/Dockerfile -t <ECR>/hailcast-predict:<sha> .
+docker build -f backend/predict/Dockerfile -t <ECR>/hailcast-dev-predict:<sha> .
 # 2) 모델 1회 학습 업로드 (Job 또는 로컬)
 python ml/train.py            # DB 데이터 충분 시 / --bootstrap: 합성 초기 모델
 # 3) manifest 적용: configmap/secret → deployments → scaledobject → rbac

@@ -1,5 +1,0 @@
-fastapi
-pydantic-settings
-boto3
-SQLAlchemy
-psycopg2-binary

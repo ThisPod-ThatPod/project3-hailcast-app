@@ -15,15 +15,17 @@ Simulator → Call API → SQS → Worker → RDS
 ## 프로젝트 구조 (폴더 = 파드 단위)
 
 ```
-common/           공통 패키지 (모든 이미지에 COPY) — core(logger·settings·exceptions·scheduler·metrics),
-                  aws(sqs/s3 adapter), db(entities·session), models(DTO)
-call-api/   :8000 콜 접수(빠름) — Router→Service→SQS Adapter, 즉시 202
-worker/           SQS Long Polling 소비 → RDS 저장 (KEDA 스케일 대상)
-simulator/  :8001 Traffic Engine — start/stop/increase/decrease/reset, TPS 즉시 반영
-weather-cron:8002 Open-Meteo 수집 Scheduler + 조회 API (CronJob 모드: --once)
-predict/    :8003 Forecast·Scaling 스케줄러 + Prediction/Scaling/Dashboard/Health API
-ml/               오프라인 학습(LightGBM→S3) + 학습·서빙 공유 피처(features.py)
-k8s/              배포 계약 예시 manifest (실 배포는 인프라 레포)
+backend/
+  common/           공통 패키지 (모든 이미지에 COPY) — core(logger·settings·exceptions·scheduler·metrics),
+                    aws(sqs/s3 adapter), db(entities·session), models(DTO)
+  call-api/   :8000 콜 접수(빠름) — Router→Service→SQS Adapter, 즉시 202
+  worker/           SQS Long Polling 소비 → RDS 저장 (KEDA 스케일 대상)
+  simulator/  :8001 Traffic Engine — start/stop/increase/decrease/reset, TPS 즉시 반영
+  weather-cron:8002 Open-Meteo 수집 Scheduler + 조회 API (CronJob 모드: --once)
+  predict/    :8003 Forecast·Scaling 스케줄러 + Prediction/Scaling/Dashboard/Health API
+frontend/           React/Vite 대시보드·시뮬레이터 UI
+ml/                 오프라인 학습(LightGBM→S3) + 학습·서빙 공유 피처(features.py)
+k8s/                배포 계약 예시 manifest (실 배포는 인프라 레포)
 ```
 
 각 서비스 내부는 **Router → Service → Repository → DB** 레이어, AWS/K8s 접근은 **Adapter**로만.
@@ -59,7 +61,7 @@ curl localhost:8003/dashboard/summary            # 전체 상태 한 번에
 | | `GET /health` `/ready` `/live` `/metrics` | 상태·Probe·Prometheus |
 | 공통 | `GET /healthz` | 서비스별 기본 헬스체크 |
 
-## Scheduler (공통 베이스: common/core/scheduler.py — 실패해도 다음 주기 정상 대기)
+## Scheduler (공통 베이스: backend/common/core/scheduler.py — 실패해도 다음 주기 정상 대기)
 
 | Scheduler | 파드 | 주기 (env) | 역할 |
 |---|---|---|---|
@@ -91,7 +93,7 @@ TPS 변경은 Generator 재생성 없이 즉시 반영, Call API 장애에도 Ge
 
 `GET /dashboard/summary` 하나로 traffic(Simulator 프록시)·prediction·weather·scaling·worker(큐 적체/처리량/지연)·health 전체 반환. 부분 장애 시 해당 위젯만 `available:false`.
 
-## 환경 변수 (주요 — 전체는 common/core/settings.py + 서비스별 config.py)
+## 환경 변수 (주요 — 전체는 backend/common/core/settings.py + 서비스별 config.py)
 
 | 그룹 | 변수 |
 |---|---|
