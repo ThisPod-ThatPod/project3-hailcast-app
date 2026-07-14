@@ -70,7 +70,9 @@ class PodForecastService:
         model_version: str | None = None
         document = self._reader.read_latest()
         if document is not None:
-            predicted_replicas = self._predicted_replicas_for(document.total_predicted_demand)
+            # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
+            # predicted_replicas = self._predicted_replicas_for(document.total_predicted_demand)
+            predicted_replicas = self._predicted_replicas_for(document.predicted_taxi_demand)
             model_version = document.model_version
 
         actual_replicas: int | None = None
@@ -121,7 +123,9 @@ class PodForecastService:
                 predicted, actual = history_by_bucket.get(bucket, (None, None))
             elif bucket == now_bucket:
                 predicted = (
-                    self._predicted_replicas_for(document.total_predicted_demand)
+                    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
+                    # self._predicted_replicas_for(document.total_predicted_demand)
+                    self._predicted_replicas_for(document.predicted_taxi_demand)
                     if document is not None
                     else None
                 )

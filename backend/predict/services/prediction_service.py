@@ -106,7 +106,9 @@ class PredictionService:
             model_version=model_version,
             prediction_window_minutes=settings.prediction_window_minutes,
             horizon_steps=len(items),
-            total_predicted_demand=first_total,
+            # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
+            # total_predicted_demand=first_total,
+            predicted_taxi_demand=first_total,
             predictions=items,
         )
         logger.info(

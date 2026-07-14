@@ -58,6 +58,7 @@ class PredictSettings(BaseAppSettings):
 
     # --- KEDA ---
     keda_enabled: bool = False                    # false: InMemory(dry-run) Adapter (로컬/테스트)
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 2. keda_namespace 값 어긋남
     keda_namespace: str = "hailcast"   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
     keda_scaledobject_name: str = "hailcast-worker-scaler"
     worker_deployment_name: str = "hailcast-worker"   # 실제 파드 수(status.readyReplicas) 조회 대상

@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: hailcast-predict
+  # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
   namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
 spec:
   replicas: 1   # forecast/scaling 스케줄러 중복 실행 방지 — 반드시 1
@@ -12,10 +13,13 @@ spec:
     metadata:
       labels: { app: hailcast-predict }
     spec:
+      # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 3. ServiceAccount 이름 어긋남
       serviceAccountName: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
       containers:
         - name: predict
-          image: <ECR>/hailcast-dev-predict:latest
+          # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-2. ECR 태그 (규약 §8: 태그는 CI가 $GITHUB_SHA로 주입, latest 배포 금지)
+          # image: <ECR>/hailcast-dev-predict:latest
+          image: <ECR>/hailcast-dev-predict:<GITHUB_SHA>
           ports: [{ containerPort: 8003 }]
           envFrom:
             - configMapRef: { name: hailcast-config }
