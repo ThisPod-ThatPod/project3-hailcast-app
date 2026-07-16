@@ -1,5 +1,5 @@
 # DashboardService — Frontend 통합 상태 조회 Business Logic (H1/H2)
-# 파드 수(scaler/KEDA)·트래픽(A1 집계)만 다룬다 — 노드 수는 데이터 소스가 없어 보류(C8).
+# 파드 수(scaler/KEDA)·트래픽(A1 집계)·노드 수(NodeAdapter, C2)를 다룬다.
 from datetime import datetime, timedelta, timezone
 
 from common.core.constants import TRAFFIC_HISTORY_KEY
@@ -8,15 +8,19 @@ from common.core.store import FileStore
 from common.models.dashboard import DashboardStats, TrafficPoint
 
 from adapters.keda_adapter import KedaAdapter
+from adapters.node_adapter import NodeAdapter
 from config import PredictSettings
 
 logger = get_logger("dashboard_service")
 
 
 class DashboardService:
-    def __init__(self, store: FileStore, keda: KedaAdapter, settings: PredictSettings):
+    def __init__(
+        self, store: FileStore, keda: KedaAdapter, nodes: NodeAdapter, settings: PredictSettings
+    ):
         self._store = store
         self._keda = keda
+        self._nodes = nodes
         self._settings = settings
 
     def stats(self) -> DashboardStats:
@@ -25,11 +29,16 @@ class DashboardService:
         except Exception as exc:
             logger.warning(f"keda unreachable: {exc}", extra={"event": "dashboard_partial"})
             pods = None
+        try:
+            nodes = self._nodes.count_ready_nodes()
+        except Exception as exc:
+            logger.warning(f"node source unreachable: {exc}", extra={"event": "dashboard_partial"})
+            nodes = None
         traffic_body = self._store.read_json(self._settings.traffic_json_key) or {}
         return DashboardStats(
             pods=pods,
             traffic=int(traffic_body.get("current_bucket_requests", 0)),
-            nodes=None,  # C8 — K8s 노드 조회 데이터 소스 없음
+            nodes=nodes,
         )
 
     def traffic_history(self, minutes: int, bucket_seconds: int) -> list[TrafficPoint]:

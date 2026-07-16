@@ -7,8 +7,11 @@ from common.aws.sqs_adapter import SqsAdapter
 from common.core.store import FileStore
 
 from adapters.inmemory_keda_adapter import InMemoryKedaAdapter
+from adapters.inmemory_node_adapter import InMemoryNodeAdapter
 from adapters.keda_adapter import KedaAdapter
 from adapters.kubernetes_keda_adapter import KubernetesKedaAdapter
+from adapters.kubernetes_node_adapter import KubernetesNodeAdapter
+from adapters.node_adapter import NodeAdapter
 from config import get_settings
 from ml_runtime.model_loader import ModelLoader
 from schedulers.backup_scheduler import BackupScheduler
@@ -148,10 +151,19 @@ def get_sqs_adapter() -> SqsAdapter:
 
 
 @lru_cache
+def get_node_adapter() -> NodeAdapter:
+    settings = get_settings()
+    if settings.k8s_nodes_enabled:
+        return KubernetesNodeAdapter()
+    # 로컬(docker-compose, K8s 없음): 고정값 InMemory Adapter
+    return InMemoryNodeAdapter(fixed_count=settings.k8s_nodes_stub_count)
+
+
+@lru_cache
 def get_dashboard_service():
     from services.dashboard_service import DashboardService
 
-    return DashboardService(get_file_store(), get_keda_adapter(), get_settings())
+    return DashboardService(get_file_store(), get_keda_adapter(), get_node_adapter(), get_settings())
 
 
 @lru_cache

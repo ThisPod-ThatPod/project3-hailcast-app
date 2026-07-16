@@ -66,6 +66,12 @@ class PredictSettings(BaseAppSettings):
     # --- Pod 이력 백업 (Dashboard 예측-실제 파드 그래프) ---
     backup_interval_seconds: float = 3600.0   # 정시 버킷 스냅샷 주기 (1시간)
 
+    # --- Dashboard 노드 수 (C2) — K8s 노드 조회 데이터 소스 ---
+    # false: InMemory 고정값 (docker-compose 등 K8s 없는 로컬)
+    # true:  K8s API 조회 — 로컬 k8s(kubeconfig)·EKS(Pod ServiceAccount) 모두 동일 코드
+    k8s_nodes_enabled: bool = False
+    k8s_nodes_stub_count: int = 1                 # InMemory Adapter가 반환할 고정 노드 수
+
     # --- Dashboard / Health ---
     health_queue_backlog_warning: int = 1000      # 큐 적체 경고 임계값
     # weather-cron 주기(4h)보다 넉넉히 여유를 둔 신선도 경고 임계값 (5시간)

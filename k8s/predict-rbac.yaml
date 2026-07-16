@@ -29,3 +29,27 @@ roleRef:
   kind: Role
   name: hailcast-scaledobject-patcher
   apiGroup: rbac.authorization.k8s.io
+---
+# 대시보드 노드 수 조회(C2)용 — Node는 cluster-scoped 리소스라 Role이 아닌 ClusterRole 필요.
+# 로컬 k8s·EKS 공통 (K8s RBAC만 필요, AWS IAM/IRSA 추가 권한 불필요).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hailcast-node-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hailcast-predict-node-reader
+subjects:
+  - kind: ServiceAccount
+    name: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
+    namespace: hailcast
+roleRef:
+  kind: ClusterRole
+  name: hailcast-node-reader
+  apiGroup: rbac.authorization.k8s.io
