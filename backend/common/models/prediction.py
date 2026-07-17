@@ -23,7 +23,6 @@ class PredictionDocument(BaseModel):
     prediction_window_minutes: int
     horizon_steps: int              # 몇 개의 시간창을 예측했는지
     # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-    # total_predicted_demand: float   # 첫 번째 시간창의 예측값 (KEDA 스케일 기준값)
     predicted_taxi_demand: float    # 첫 번째 시간창의 예측값 (KEDA 스케일 기준값)
     predictions: list[PredictionItem]
 

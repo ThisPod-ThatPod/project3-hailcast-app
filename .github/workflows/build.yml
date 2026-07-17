@@ -32,14 +32,13 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build and push (SHA 태그 + latest)
+      # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-2. ECR 태그 (규약 §8: 태그는 커밋 SHA만, latest 금지)
+      - name: Build and push (SHA 태그)
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE: hailcast-dev-${{ matrix.service }}
         run: |
           # build context = 레포 루트 (common/·ml/ 공유 모듈 COPY)
           docker build -f backend/${{ matrix.service }}/Dockerfile \
-            -t "$REGISTRY/$IMAGE:${GITHUB_SHA::7}" \
-            -t "$REGISTRY/$IMAGE:latest" .
+            -t "$REGISTRY/$IMAGE:${GITHUB_SHA::7}" .
           docker push "$REGISTRY/$IMAGE:${GITHUB_SHA::7}"
-          docker push "$REGISTRY/$IMAGE:latest"
