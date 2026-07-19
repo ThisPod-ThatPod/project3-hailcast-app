@@ -34,6 +34,21 @@ class BaseAppSettings(BaseSettings):
     json_store_backend: str = "local"
     json_store_local_dir: str = "./local_store"
 
+    # --- RDS(PostgreSQL) — call-api/worker의 Call 기록용 (C9, 2026-07-16) ---
+    # 운영에서는 ESO가 Secrets Manager 값을 K8s Secret으로 주입, 코드는 환경변수만 읽는다.
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_name: str = "hailcast"
+    db_user: str = "hailcast"
+    db_password: str = ""
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+psycopg2://{self.db_user}:{self.db_password}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
+
 
 @lru_cache
 def get_base_settings() -> BaseAppSettings:

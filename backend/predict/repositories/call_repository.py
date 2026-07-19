@@ -1,6 +1,6 @@
 # Predict용 Call Repository — Dashboard 트래픽 그래프 조회 전용
-# [미사용, 2026-07-13] DB(J3) 대신 FileStore로 재설계되면서 코드 어디서도 안 부름 —
-# RDS 도입 시 재사용 가능하게 삭제하지 않고 남겨둠 (backend/worker-db-original/ 참고).
+# [미사용, 2026-07-16] traffic/dashboard 프리픽스는 D-1 결정으로 S3 유지 확정 —
+# 콜 쓰기/단건조회만 RDS로 갔다(common/db/call_repository.py). 이 파일은 여전히 미사용.
 from datetime import datetime, timezone
 
 from sqlalchemy import select

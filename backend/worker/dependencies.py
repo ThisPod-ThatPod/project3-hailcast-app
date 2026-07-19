@@ -2,11 +2,11 @@
 from functools import lru_cache
 
 from common.aws.client_factory import AwsClientFactory
-from common.aws.s3_adapter import S3Adapter
 from common.aws.sqs_adapter import SqsAdapter
-from common.core.store import FileStore
+from common.db.database import Database
 
 from config import get_settings
+from services.state_manager import StateManager
 from services.worker_service import WorkerService
 
 
@@ -28,17 +28,20 @@ def get_sqs_adapter() -> SqsAdapter:
 
 
 @lru_cache
-def get_s3_adapter() -> S3Adapter:
+def get_database() -> Database:
     settings = get_settings()
-    return S3Adapter(get_aws_factory(), bucket=settings.s3_bucket, auto_create=settings.s3_auto_create_bucket)
+    return Database(settings.database_url)
 
 
 @lru_cache
-def get_file_store() -> FileStore:
-    settings = get_settings()
-    s3_adapter = get_s3_adapter() if settings.json_store_backend == "s3" else None
-    return FileStore(settings.json_store_backend, settings.json_store_local_dir, s3_adapter)
+def get_state_manager() -> StateManager:
+    return StateManager()
 
 
 def build_worker_service() -> WorkerService:
-    return WorkerService(sqs=get_sqs_adapter(), store=get_file_store(), settings=get_settings())
+    return WorkerService(
+        sqs=get_sqs_adapter(),
+        database=get_database(),
+        state_manager=get_state_manager(),
+        settings=get_settings(),
+    )

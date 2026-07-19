@@ -55,7 +55,7 @@ class ExternalApiError(AppError):
 
 
 class KubernetesError(AppError):
-    """Kubernetes API(KEDA ScaledObject Patch 등) 실패. KEDA Adapter에서만 발생시킨다."""
+    """Kubernetes API(KEDA ScaledObject Patch, Node 조회 등) 실패. K8s Adapter에서만 발생시킨다."""
 
     status_code = 502
     code = "KUBERNETES_ERROR"

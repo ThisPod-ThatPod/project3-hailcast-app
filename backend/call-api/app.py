@@ -14,7 +14,7 @@ from common.core.exception_handlers import register_exception_handlers
 from common.core.logger import configure_logging, get_logger
 
 from config import get_settings
-from dependencies import get_traffic_flush_scheduler
+from dependencies import get_database, get_traffic_flush_scheduler
 from routers.call_router import router as call_router
 
 settings = get_settings()
@@ -24,6 +24,7 @@ logger = get_logger("call_api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    get_database().init_schema()
     scheduler = get_traffic_flush_scheduler()
     task = asyncio.create_task(scheduler.run_loop(), name="traffic-flush-scheduler")
     logger.info(

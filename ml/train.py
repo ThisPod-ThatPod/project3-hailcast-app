@@ -1,4 +1,5 @@
 # 8.2 LightGBM 학습 → S3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -10,7 +11,20 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from common.aws.client_factory import AwsClientFactory
+from common.aws.s3_adapter import S3Adapter
+from common.core.settings import BaseAppSettings
+
 from features import CATEGORICAL_FEATURES, dataframe_to_features
+
+
+class MlTrainSettings(BaseAppSettings):
+    service_name: str = "ml-train"
+    # 인프라(S3 IRSA) 준비 전까지 기본 false — 로컬 저장만 하고 끝난다.
+    # 켜지면 predict/ml_runtime/model_loader.py가 읽는 위치(models/latest/*)에 그대로 업로드.
+    ml_s3_upload_enabled: bool = False
+    model_s3_prefix: str = "models"
+
 
 DATA_PATH = Path(__file__).parent / "data" / "nycTaxiWeather.csv"
 MODEL_PATH = Path(__file__).parent / "latest_model8.pkl"
@@ -90,14 +104,34 @@ def train() -> lgb.LGBMRegressor:
     rmse = mean_squared_error(y_valid, pred) ** 0.5
     print(f"valid MAE={mae:.2f} RMSE={rmse:.2f} best_iteration={model.best_iteration_}")
 
-    return model
+    return model, mae, rmse
 
 
 def save_model(model: lgb.LGBMRegressor, path: Path = MODEL_PATH) -> None:
     joblib.dump(model, path)
+
+
+def upload_to_s3(model_path: Path, mae: float, rmse: float) -> None:
+    settings = MlTrainSettings()
+    if not settings.ml_s3_upload_enabled:
+        print("ML_S3_UPLOAD_ENABLED=false — S3 업로드 스킵 (로컬 저장만 함)")
+        return
+    factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
+    s3 = S3Adapter(factory, bucket=settings.s3_bucket)
+    version = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    prefix = f"{settings.model_s3_prefix}/latest"
+    s3.upload_file(f"{prefix}/model.pkl", str(model_path))
+    s3.upload_json(
+        f"{prefix}/metadata.json",
+        {"version": version, "mae": mae, "rmse": rmse, "trained_at": version},
+    )
+    print(f"S3 업로드 완료 (bucket={settings.s3_bucket}, prefix={prefix}, version={version})")
+
+
 def main() -> None:
-    model = train()
+    model, mae, rmse = train()
     save_model(model)
+    upload_to_s3(MODEL_PATH, mae, rmse)
 
 
 if __name__ == "__main__":

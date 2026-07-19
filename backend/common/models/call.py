@@ -49,6 +49,14 @@ class CallStatusResponse(BaseModel):
     processed_at: datetime | None = None
 
 
+class SqsInjectResponse(BaseModel):
+    """POST /simulator/sqs-inject 응답 — call-api를 우회해 큐에 직접 발행된 메시지 정보."""
+
+    injected: int
+    request_ids: list[str]
+    queued_at: datetime
+
+
 class CallMessage(BaseModel):
     """SQS Message Body 스키마 (JSON). Request 전체를 보존한다."""
 

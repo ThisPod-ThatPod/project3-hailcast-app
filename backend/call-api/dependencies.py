@@ -7,6 +7,7 @@ from common.aws.client_factory import AwsClientFactory
 from common.aws.s3_adapter import S3Adapter
 from common.aws.sqs_adapter import SqsAdapter
 from common.core.store import FileStore
+from common.db.database import Database
 
 from config import get_settings
 from schedulers.traffic_flush_scheduler import TrafficFlushScheduler
@@ -46,6 +47,12 @@ def get_file_store() -> FileStore:
 
 
 @lru_cache
+def get_database() -> Database:
+    settings = get_settings()
+    return Database(settings.database_url)
+
+
+@lru_cache
 def get_traffic_counter() -> TrafficCounter:
     return TrafficCounter(get_file_store())
 
@@ -63,4 +70,4 @@ def get_call_service(
 
 
 def get_call_query_service() -> CallQueryService:
-    return CallQueryService(get_file_store())
+    return CallQueryService(get_database())

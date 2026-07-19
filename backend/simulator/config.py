@@ -25,6 +25,11 @@ class SimulatorSettings(BaseAppSettings):
     # --- S3 (LocalStack/moto 전용 — 운영은 IaC가 버킷 소유) ---
     s3_auto_create_bucket: bool = False
 
+    # --- SQS 직접 유입 (C3 — FE "SQS 메시지 유입" 버튼, call-api 우회 데모) ---
+    sqs_inject_max_count: int = 100       # 1회 호출로 발행 가능한 최대 메시지 수
+    # 로컬(LocalStack) 큐 자동 생성 (운영은 IaC가 큐 소유)
+    sqs_auto_create_queue: bool = False
+
 
 @lru_cache
 def get_settings() -> SimulatorSettings:

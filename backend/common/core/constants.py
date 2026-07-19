@@ -41,11 +41,6 @@ TRAFFIC_JSON_KEY = "dashboard/traffic.json"
 # 10초 버킷별 원시 이력 — H2(트래픽 추이 그래프)가 여기서 원하는 구간만 골라 읽는다.
 TRAFFIC_HISTORY_KEY = "dashboard/traffic-history.json"
 
-# --- C: 콜 처리 상태 계약 ---
-# worker가 처리한 콜마다 <call_id>.json 하나씩 쓰고, call-api의 GET /call/{id}가
-# 같은 키로 읽는다 (common/models/call.py::CallStatusResponse 형태로 매핑).
-CALL_RECORD_PREFIX = "calls/"
-
 # --- A2: simulator 상태 계약 ---
 # simulator(로컬 전용, 파드로 안 뜸)가 주기적으로 자기 상태(SimulatorStatus)를 여기 쓴다.
 # predict/대시보드는 simulator 프로세스에 실시간 HTTP로 안 묻고 이 파일만 읽는다 — local

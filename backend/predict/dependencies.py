@@ -5,10 +5,14 @@ from common.aws.client_factory import AwsClientFactory
 from common.aws.s3_adapter import S3Adapter
 from common.aws.sqs_adapter import SqsAdapter
 from common.core.store import FileStore
+from common.db.database import Database
 
 from adapters.inmemory_keda_adapter import InMemoryKedaAdapter
+from adapters.inmemory_node_adapter import InMemoryNodeAdapter
 from adapters.keda_adapter import KedaAdapter
 from adapters.kubernetes_keda_adapter import KubernetesKedaAdapter
+from adapters.kubernetes_node_adapter import KubernetesNodeAdapter
+from adapters.node_adapter import NodeAdapter
 from config import get_settings
 from ml_runtime.model_loader import ModelLoader
 from schedulers.backup_scheduler import BackupScheduler
@@ -16,11 +20,17 @@ from schedulers.forecast_scheduler import ForecastScheduler
 from schedulers.scaling_scheduler import ScalingScheduler
 from schedulers.traffic_scheduler import TrafficScheduler
 from services.pod_forecast_service import PodForecastService
-from services.prediction_reader import FilePredictionReader, PredictionReader
+from services.prediction_reader import DbPredictionReader, PredictionReader
 from services.prediction_service import PredictionService
 from services.scaler_service import ScalerService
 from services.scaling_decision_engine import ScalingDecisionEngine
 from services.traffic_aggregator_service import TrafficAggregatorService
+
+
+@lru_cache
+def get_database() -> Database:
+    settings = get_settings()
+    return Database(settings.database_url)
 
 
 @lru_cache
@@ -45,7 +55,7 @@ def get_file_store() -> FileStore:
 
 @lru_cache
 def get_prediction_service() -> PredictionService:
-    return PredictionService(get_model_loader(), get_file_store(), get_settings())
+    return PredictionService(get_model_loader(), get_file_store(), get_database(), get_settings())
 
 
 @lru_cache
@@ -74,9 +84,9 @@ def get_traffic_scheduler() -> TrafficScheduler:
 # ---------- Predictive Scaling ----------
 @lru_cache
 def get_prediction_reader() -> PredictionReader:
-    # Mock 교체 지점 — 테스트/Simulator 연동 시 여기서 다른 Reader 구현체를 반환
+    # 07-15 §4-5 확정 — RDS가 ScalerService/PodForecastService 공용 판단 소스.
     settings = get_settings()
-    return FilePredictionReader(get_file_store(), settings.prediction_s3_prefix)
+    return DbPredictionReader(get_database(), settings.prediction_window_minutes)
 
 
 @lru_cache
@@ -148,10 +158,19 @@ def get_sqs_adapter() -> SqsAdapter:
 
 
 @lru_cache
+def get_node_adapter() -> NodeAdapter:
+    settings = get_settings()
+    if settings.k8s_nodes_enabled:
+        return KubernetesNodeAdapter()
+    # 로컬(docker-compose, K8s 없음): 고정값 InMemory Adapter
+    return InMemoryNodeAdapter(fixed_count=settings.k8s_nodes_stub_count)
+
+
+@lru_cache
 def get_dashboard_service():
     from services.dashboard_service import DashboardService
 
-    return DashboardService(get_file_store(), get_keda_adapter(), get_settings())
+    return DashboardService(get_file_store(), get_keda_adapter(), get_node_adapter(), get_settings())
 
 
 @lru_cache
@@ -165,3 +184,20 @@ def get_health_service():
         [get_forecast_scheduler(), get_scaling_scheduler(), get_backup_scheduler(), get_traffic_scheduler()],
         get_settings(),
     )
+
+
+# ---------- C10: DynamoDB 오답노트 (2026-07-16, 트리거/필드 설계 미확정 — 배선 보류) ----------
+# 팀 확정되면 아래 주석만 풀면 됨(구현은 services/prediction_accuracy_logger.py에 이미 있음).
+# 확정 후엔 K8S_NODES_ENABLED류 env 플래그(예: PREDICTION_ACCURACY_LOG_ENABLED)로
+# on/off 하는 형태가 될 가능성이 높음 — 지금은 설정값 자체가 없어서 하드코딩 자리표시만 남김.
+#
+# @lru_cache
+# def get_dynamodb_adapter() -> DynamoDbAdapter:
+#     settings = get_settings()
+#     factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
+#     return DynamoDbAdapter(factory, table_name="hailcast-dev-prediction-log")  # 인프라 #41
+#
+#
+# @lru_cache
+# def get_prediction_accuracy_logger() -> PredictionAccuracyLogger:
+#     return PredictionAccuracyLogger(get_dynamodb_adapter(), error_ratio_threshold=0.3)  # 임계값 미정, 예시값

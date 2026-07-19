@@ -1,6 +1,3 @@
-# [격리] RDS 기반 워커(worker-db-original/worker_service.py)가 쓰는 상태 전이 관리자.
-# FileStore 버전은 이 클래스 없이 더 단순한 방식으로 상태를 기록한다.
-#
 # State Manager — 콜 상태 전이 규칙을 한곳에서 관리 (DB가 상태의 원본)
 from datetime import datetime, timezone
 

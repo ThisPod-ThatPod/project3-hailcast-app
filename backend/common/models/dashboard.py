@@ -7,7 +7,8 @@ from pydantic import BaseModel
 class DashboardStats(BaseModel):
     """GET /dashboard/summary — 대시보드 상단 통계 3칸 (H1).
 
-    노드 수는 K8s API 접근이 필요해 아직 데이터 소스가 없다(C8, 보류) — null로 내려간다.
+    nodes는 클러스터의 Ready 노드 수(C2) — K8s API 조회 실패 시 null로 내려간다.
+    K8S_NODES_ENABLED=false(로컬 compose)면 고정값(K8S_NODES_STUB_COUNT).
     """
 
     pods: int | None = None

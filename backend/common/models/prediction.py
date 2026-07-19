@@ -10,6 +10,11 @@ class PredictionItem(BaseModel):
     target_time: datetime           # 이 시각부터 window 동안의 수요 예측
     predicted_demand: float = Field(..., ge=0)
     confidence: float | None = Field(default=None, ge=0, le=1)
+    # RDS Prediction 테이블 컬럼과 대응(07-15 §4-1 확정) — 채택된 시나리오(악조건 쪽)의 피처값.
+    # 기존 소비자(KEDA/Grafana)는 안 봐도 되는 선택 필드라 추가해도 하위호환 안 깨짐.
+    temperature: float | None = Field(default=None)
+    humidity: float | None = Field(default=None)
+    is_raining: bool | None = Field(default=None)
 
 
 class PredictionDocument(BaseModel):
