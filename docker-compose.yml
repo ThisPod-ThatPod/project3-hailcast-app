@@ -158,6 +158,7 @@ services:
     environment:
       <<: *predict-env
       SERVICE_NAME: ml-train
+      ML_S3_UPLOAD_ENABLED: "false"   # 인프라(S3 IRSA) 준비되면 "true"로 (로컬은 moto로 먼저 켜볼 수 있음)
     command: ["python", "ml/train.py", "--bootstrap"]
     depends_on:
       postgres:
