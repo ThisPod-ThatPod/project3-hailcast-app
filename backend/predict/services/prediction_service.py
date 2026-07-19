@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from common.core.exceptions import PredictionError
 from common.core.logger import get_logger
 from common.core.store import FileStore
+from common.db.database import Database
 from common.models.prediction import PredictionDocument, PredictionItem
 
 # 학습·서빙 공유 피처 모듈 (ml/features.py — train-serve skew 방지)
@@ -22,6 +23,7 @@ from features import build_features, to_model_input
 
 from config import PredictSettings
 from ml_runtime.model_loader import ModelLoader
+from repositories.prediction_repository import PredictionRepository
 
 logger = get_logger("prediction_service")
 
@@ -36,9 +38,12 @@ def _weekday_sunday_zero(dt: datetime) -> int:
 
 
 class PredictionService:
-    def __init__(self, model_loader: ModelLoader, store: FileStore, settings: PredictSettings):
+    def __init__(
+        self, model_loader: ModelLoader, store: FileStore, database: Database, settings: PredictSettings
+    ):
         self._model_loader = model_loader
         self._store = store
+        self._db = database
         self._settings = settings
 
     def _with_retry(self, name: str, fn):
@@ -87,15 +92,21 @@ class PredictionService:
         items: list[PredictionItem] = []
         for hour_start in target_hours:
             best_demand = 0.0
+            best_row = buckets[hour_start][0]
             for row in buckets[hour_start]:
                 features = build_features(hour_start, row["temperature"], row["humidity"], row["is_raining"])
                 model_input = to_model_input(features)
                 raw = self._with_retry("model_predict", lambda mi=model_input: model.predict(mi)[0])
-                best_demand = max(best_demand, float(raw))
+                if float(raw) >= best_demand:
+                    best_demand = float(raw)
+                    best_row = row
             items.append(
                 PredictionItem(
                     target_time=hour_start.astimezone(timezone.utc),
                     predicted_demand=round(max(0.0, best_demand), 2),
+                    temperature=best_row["temperature"],
+                    humidity=best_row["humidity"],
+                    is_raining=best_row["is_raining"],
                 )
             )
 
@@ -159,6 +170,13 @@ class PredictionService:
             ts_key = f"{prefix}/history/{document.generated_at.strftime('%Y%m%d-%H%M%S')}.json"
             self._with_retry("store_write_history", lambda: self._store.write_json(ts_key, body))
         self._save_csv(document, prefix)
+        self._with_retry("db_write", lambda: self._save_to_db(document))
+
+    def _save_to_db(self, document: PredictionDocument) -> None:
+        # 07-15 §4-5 확정 — RDS가 대시보드 조회 + ScalerService 스케일링 판단 소스 겸용.
+        # S3(위)는 그대로 유지: GET /prediction/latest·health check가 아직 S3를 직접 읽는다.
+        with self._db.session_scope() as session:
+            PredictionRepository(session).save_document(document)
 
     def _save_csv(self, document: PredictionDocument, prefix: str) -> None:
         buf = io.StringIO()

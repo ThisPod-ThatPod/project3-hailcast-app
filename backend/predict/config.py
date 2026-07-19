@@ -15,7 +15,7 @@ class PredictSettings(BaseAppSettings):
 
     # --- Prediction ---
     prediction_window_minutes: int = 60      # 예측 시간창 크기 (1시간 버킷)
-    prediction_horizon_hours: int = 4        # 한 번 실행할 때 몇 시간 앞까지 예측할지 (주기와 동일 — 다음 실행까지 안 끊기게)
+    prediction_horizon_hours: int = 5        # 한 번 실행할 때 몇 시간 앞까지 예측할지 (07-15 회의 확정: 4시간 주기 + 5시간 커버)
 
     # --- Model (S3) ---
     model_s3_prefix: str = "models"       # models/latest/{model.pkl, metadata.json}
@@ -45,7 +45,9 @@ class PredictSettings(BaseAppSettings):
     scaling_buffer_pods: int = 1                  # n+1 여유분 (수요 0이면 버퍼 없이 1개)
     scaling_min_replicas: int = 1
     scaling_max_replicas: int = 10
-    prediction_max_age_seconds: float = 3600.0    # 이보다 오래된 예측으로는 스케일하지 않음
+    # 이보다 오래된 예측으로는 스케일하지 않음. prediction_interval_seconds(4시간)보다 짧으면
+    # 한 주기의 대부분(구 3600s 기준 75%)이 "예측 오래됨"으로 조용히 스킵되는 실버그였음 — 주기 이상으로 상향.
+    prediction_max_age_seconds: float = 14400.0
     scaling_retry_count: int = 3
     scaling_retry_backoff_seconds: float = 2.0
 

@@ -17,6 +17,7 @@ from common.core.metrics import metrics
 from config import get_settings
 from dependencies import (
     get_backup_scheduler,
+    get_database,
     get_forecast_scheduler,
     get_scaling_scheduler,
     get_traffic_scheduler,
@@ -33,6 +34,7 @@ logger = get_logger("predict")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    get_database().init_schema()
     schedulers = [
         get_forecast_scheduler(),
         get_scaling_scheduler(),

@@ -1,6 +1,6 @@
 # Prediction Repository — 예측 History 저장/조회
-# [미사용, 2026-07-13] DB(J3) 대신 FileStore(predictions/latest.json + history/)로
-# 재설계되면서 코드 어디서도 안 부름 — RDS 도입 시 재사용 가능하게 삭제하지 않고 남겨둠.
+# 2026-07-16: 07-15 §4-5 확정으로 다시 사용됨 — RDS가 대시보드 조회 +
+# ScalerService 스케일링 판단 소스 겸용(PredictionService가 write, DbPredictionReader가 read).
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -20,6 +20,9 @@ class PredictionRepository(BaseRepository):
                         target_time=item.target_time,
                         predicted_demand=item.predicted_demand,
                         confidence=item.confidence,
+                        temperature=item.temperature,
+                        humidity=item.humidity,
+                        is_raining=int(item.is_raining) if item.is_raining is not None else None,
                         prediction_window_minutes=document.prediction_window_minutes,
                         model_version=document.model_version,
                         generated_at=document.generated_at,

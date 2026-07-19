@@ -14,24 +14,17 @@ class Base(DeclarativeBase):
 
 
 class Call(Base):
-    """택시 콜 원본 레코드.
+    """택시 콜 발생 기록 — 서비스 화면 상태조회(GET /call/{id})용.
 
-    향후 Prediction/Analytics/Feature Engineering에서 그대로 쓸 수 있도록
-    좌표·시각·출처·처리 이력을 모두 보존한다.
+    C7(2026-07-16): user_id/pickup/destination/source는 어디서도 다시 읽히지 않아
+    (모델은 시간+날씨만 씀, 상태조회 응답에도 없음) 저장하지 않는다 — 콜이 발생했다는
+    사실과 처리 이력만 남긴다.
     """
 
     __tablename__ = "calls"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     call_id: Mapped[str] = mapped_column(String(36), unique=True, index=True)
-
-    # --- 요청 원본 (ML feature 소스) ---
-    # B1(2026-07-13): 모델이 시간+날씨만 쓰고 개별 콜의 위치를 안 써서(ml/data 확인)
-    # CallRequest에서 좌표/zone_id/passenger_count를 뺐다 — 여기도 맞춰서 텍스트로 정리.
-    user_id: Mapped[str] = mapped_column(String(64), index=True)
-    pickup: Mapped[str] = mapped_column(String(200))
-    destination: Mapped[str] = mapped_column(String(200))
-    source: Mapped[str] = mapped_column(String(16), default="api")  # api | simulator
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
     # --- 파이프라인 처리 이력 ---
@@ -90,10 +83,12 @@ class Weather(Base):
 
 
 class Prediction(Base):
-    """수요 예측 History — Dashboard 조회용 (zone 없음, 뉴욕 날씨 기반 글로벌 수요 하나).
+    """수요 예측 History — 대시보드 조회 + ScalerService 스케일링 판단 소스 겸용
+    (zone 없음, 뉴욕 날씨 기반 글로벌 수요 하나).
 
     target_time으로 조회한다. 같은 target_time에 대해 여러 번 예측될 수 있으므로
-    generated_at으로 최신 배치를 식별한다.
+    generated_at으로 최신 배치를 식별한다. temperature/humidity/is_raining은
+    07-15 회의 확정(§4-1) — 채택된 시나리오(악조건 쪽)의 피처값 재현용.
     """
 
     __tablename__ = "predictions"
@@ -102,6 +97,9 @@ class Prediction(Base):
     target_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     predicted_demand: Mapped[float] = mapped_column(Float)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    humidity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_raining: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0/1
     prediction_window_minutes: Mapped[int] = mapped_column(Integer, default=60)
     model_version: Mapped[str] = mapped_column(String(64))
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

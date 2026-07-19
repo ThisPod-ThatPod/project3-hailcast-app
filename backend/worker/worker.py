@@ -8,7 +8,7 @@ os.environ.setdefault("SERVICE_NAME", "worker")
 from common.core.logger import configure_logging, get_logger
 
 from config import get_settings
-from dependencies import build_worker_service
+from dependencies import build_worker_service, get_database
 
 
 def main() -> None:
@@ -16,6 +16,7 @@ def main() -> None:
     configure_logging(settings.log_level)
     logger = get_logger("worker")
 
+    get_database().init_schema()
     service = build_worker_service()
 
     def handle_sigterm(signum, frame):

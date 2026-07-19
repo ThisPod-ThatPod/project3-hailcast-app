@@ -1,17 +1,14 @@
 # WorkerService — SQS 소비 Business Logic
-# 흐름: Polling → Deserialize → Validation → FileStore Save → ACK(delete)
+# 흐름: Polling → Deserialize → Validation → RDS Save → ACK(delete)
 # 오류 시 메시지를 삭제하지 않아 Visibility Timeout 후 재수신(재시도)된다. (향후 DLQ 연계)
-#
-# DB(RDS) 기반 버전은 backend/worker-db-original/에 격리돼 있다 — 인프라 다이어그램은
-# RDS 기록을 요구하지만(J3와 충돌, project_hailcast_architecture_conflict.md 참고),
-# 이번 재설계에서는 FileStore로 통일한다.
 import time
 from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
 from common.aws.sqs_adapter import SqsAdapter
-from common.core.constants import CALL_RECORD_PREFIX, CallStatus
+from common.core.constants import CallStatus
+from common.core.exceptions import AwsError, DatabaseError
 from common.core.logger import get_logger
 from common.core.metrics import (
     QUEUE_LATENCY_SECONDS,
@@ -19,18 +16,27 @@ from common.core.metrics import (
     WORKER_PROCESSED_TOTAL,
     metrics,
 )
-from common.core.store import FileStore
+from common.db.call_repository import CallRepository
+from common.db.database import Database
 from common.models.call import CallMessage
 
 from config import WorkerSettings
+from services.state_manager import StateManager
 
 logger = get_logger("worker_service")
 
 
 class WorkerService:
-    def __init__(self, sqs: SqsAdapter, store: FileStore, settings: WorkerSettings):
+    def __init__(
+        self,
+        sqs: SqsAdapter,
+        database: Database,
+        state_manager: StateManager,
+        settings: WorkerSettings,
+    ):
         self._sqs = sqs
-        self._store = store
+        self._db = database
+        self._state = state_manager
         self._settings = settings
         self._running = False
 
@@ -44,9 +50,12 @@ class WorkerService:
         while self._running:
             try:
                 self.poll_once()
-            except Exception as exc:
+            except AwsError as exc:
                 # 큐 접근 자체가 실패하면 잠시 대기 후 재시도 (루프는 죽지 않는다)
-                logger.error(f"queue polling failed: {exc}", extra={"event": "poll_error"})
+                logger.error(
+                    f"queue polling failed: {exc.message}",
+                    extra={"event": "poll_error"},
+                )
                 time.sleep(5)
 
     def stop(self) -> None:
@@ -85,48 +94,43 @@ class WorkerService:
         except ValidationError as exc:
             return self._handle_poison(msg, reason=f"invalid message body: {exc.errors()[:3]}")
 
-        key = f"{CALL_RECORD_PREFIX}{message.request_id}.json"
-
-        # 2) Business Logic + FileStore Save
+        # 2) Business Logic + DB Save
         try:
-            existing = self._store.read_json(key)
-            if existing is not None:
-                # 재수신(visibility timeout 만료 등) — 멱등 처리, 다시 쓰지 않는다
-                logger.info(
-                    "duplicate delivery, already saved",
-                    extra={"event": "worker_duplicate", "request_id": message.request_id},
-                )
-            else:
-                now = datetime.now(timezone.utc)
-                req = message.data
-                record = {
-                    "call_id": message.request_id,
-                    "user_id": req.user_id,
-                    "pickup": req.pickup,
-                    "destination": req.destination,
-                    "source": req.source,
-                    "requested_at": (req.requested_at or message.timestamp).isoformat(),
-                    "status": str(CallStatus.DONE),
-                    "message_version": message.version,
-                    "enqueued_at": message.timestamp.isoformat(),
-                    "processed_at": now.isoformat(),
-                    "receive_count": receive_count,
-                }
-                self._store.write_json(key, record)
-                logger.info(
-                    "call saved",
-                    extra={"event": "worker_save", "request_id": message.request_id, "status": str(CallStatus.DONE)},
-                )
-        except Exception as exc:
+            with self._db.session_scope() as session:
+                repository = CallRepository(session)
+                existing = repository.get_by_call_id(message.request_id)
+                if existing is not None:
+                    # 재수신(visibility timeout 만료 등) — 멱등 처리
+                    existing.receive_count = receive_count
+                    if existing.status != CallStatus.DONE:
+                        self._state.mark_done(existing)
+                    logger.info(
+                        "duplicate delivery, already saved",
+                        extra={"event": "worker_duplicate", "request_id": message.request_id},
+                    )
+                else:
+                    call = repository.insert_from_message(
+                        message, status=CallStatus.PROCESSING, receive_count=receive_count
+                    )
+                    self._state.mark_done(call)
+                    logger.info(
+                        "call saved",
+                        extra={
+                            "event": "worker_save",
+                            "request_id": message.request_id,
+                            "status": str(CallStatus.DONE),
+                        },
+                    )
+        except DatabaseError as exc:
             # 일시적 장애 가능성 — 메시지를 삭제하지 않고 재시도에 맡긴다
             metrics.increment(WORKER_FAILED_TOTAL)
             logger.error(
-                f"store save failed, message kept for retry: {exc}",
+                f"db save failed, message kept for retry: {exc.message}",
                 extra={"event": "worker_fail", "request_id": message.request_id},
             )
             return False
 
-        # 3) ACK — 저장이 끝난 뒤에만 삭제
+        # 3) ACK — 저장이 커밋된 뒤에만 삭제
         self._sqs.delete_message(msg["receipt_handle"])
         metrics.increment(WORKER_PROCESSED_TOTAL)
         latency = (datetime.now(timezone.utc) - message.timestamp).total_seconds()
