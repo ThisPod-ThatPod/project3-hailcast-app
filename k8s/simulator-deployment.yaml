@@ -1,0 +1,39 @@
+# simulator — 1 replica 고정(시연 부하 발원지, 여러 개 뜨면 트래픽 카운트가 꼬임)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hailcast-simulator
+  namespace: hailcast
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: hailcast-simulator }
+  template:
+    metadata:
+      labels: { app: hailcast-simulator }
+    spec:
+      serviceAccountName: simulator-sa
+      containers:
+        - name: simulator
+          image: <ECR>/hailcast-dev-simulator:<GITHUB_SHA>
+          ports: [{ containerPort: 8001 }]
+          envFrom:
+            - configMapRef: { name: hailcast-config }
+          env:
+            - { name: CALL_API_URL, value: "http://hailcast-call-api:8000" }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8001 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hailcast-simulator
+  namespace: hailcast
+spec:
+  selector: { app: hailcast-simulator }
+  ports: [{ port: 8001, targetPort: 8001 }]

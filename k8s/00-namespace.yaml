@@ -1,0 +1,5 @@
+# 앱 네임스페이스 — 네이밍규약서 §8-1 (predict·call-api·worker·weather-cron·frontend·simulator)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hailcast

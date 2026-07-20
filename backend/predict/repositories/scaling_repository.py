@@ -1,6 +1,6 @@
 # Scaling Repository — 스케일링 이력 저장/조회 (Dashboard + Cooldown 기준 시각)
-# [미사용, 2026-07-13] DB(J3) 대신 FileStore(scaling/history/, scaling/last-event.json)로
-# 재설계되면서 코드 어디서도 안 부름 — RDS 도입 시 재사용 가능하게 삭제하지 않고 남겨둠.
+# 2026-07-20: S3(scaling/history/, scaling/last-event.json)에서 RDS로 컷오버 완료.
+# 인프라 규약 §8-1의 "RDS ScalingEvent" 계약과 일치 — scaler_service.py가 사용.
 from datetime import datetime
 
 from sqlalchemy import select

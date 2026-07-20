@@ -118,6 +118,7 @@ def get_scaler_service() -> ScalerService:
         get_decision_engine(),
         get_keda_adapter(),
         get_file_store(),
+        get_database(),
         get_settings(),
     )
 

@@ -1,6 +1,6 @@
 # ScalerService — Predictive Scaling 오케스트레이션
 # Prediction Reader → G1(예측 기준선) → G2(실측 트래픽 반응형 조정+히스테리시스) →
-# Cooldown → KEDA Patch [Retry] → FileStore 이력
+# Cooldown → KEDA Patch [Retry] → RDS 이력(ScalingEvent, 2026-07-20 S3→RDS 컷오버)
 import time
 from datetime import datetime, timezone
 
@@ -15,17 +15,16 @@ from common.core.metrics import (
     metrics,
 )
 from common.core.store import FileStore
+from common.db.database import Database
 from common.models.scaling import ScalingSignals
 
 from adapters.keda_adapter import KedaAdapter
 from config import PredictSettings
+from repositories.scaling_repository import ScalingRepository
 from services.prediction_reader import PredictionReader
 from services.scaling_decision_engine import ScalingDecisionEngine
 
 logger = get_logger("scaler_service")
-
-_HISTORY_PREFIX = "scaling/history"
-_LAST_EVENT_KEY = "scaling/last-event.json"
 
 
 class ScalerService:
@@ -35,12 +34,14 @@ class ScalerService:
         engine: ScalingDecisionEngine,
         keda: KedaAdapter,
         store: FileStore,
+        database: Database,
         settings: PredictSettings,
     ):
         self._reader = reader
         self._engine = engine
         self._keda = keda
-        self._store = store
+        self._store = store   # G2(실측 트래픽, dashboard/traffic.json) 읽기용 — D-1 확정대로 S3 유지
+        self._db = database
         self._settings = settings
         # 상태 조회용 (Dashboard /scaling/status)
         self.last_predicted_demand: float | None = None
@@ -69,9 +70,9 @@ class ScalerService:
     def cooldown_remaining(self) -> float:
         last = self.last_scaling_at
         if last is None:
-            event = self._store.read_json(_LAST_EVENT_KEY)
-            if event:
-                last = datetime.fromisoformat(event["created_at"])
+            with self._db.session_scope() as session:
+                last = ScalingRepository(session).last_event_time()
+            if last is not None:
                 self.last_scaling_at = last
         if last is None:
             return 0.0
@@ -199,7 +200,7 @@ class ScalerService:
         action = "SCALE_UP" if applied > current else "SCALE_DOWN"
         now = datetime.now(timezone.utc)
         self.last_scaling_at = now
-        self._save_history_event(demand, current, applied, action, decision_note, document.model_version, now)
+        self._save_history_event(demand, current, applied, action, decision_note, document.model_version)
         metrics.increment(SCALING_TOTAL)
         metrics.increment(SCALE_UP_TOTAL if action == "SCALE_UP" else SCALE_DOWN_TOTAL)
         metrics.observe(CURRENT_REPLICA, applied)
@@ -221,16 +222,13 @@ class ScalerService:
         action: str,
         reason: str,
         model_version: str | None,
-        now: datetime,
     ) -> None:
-        event = {
-            "predicted_demand": demand,
-            "old_replica": old_replica,
-            "new_replica": new_replica,
-            "action": action,
-            "reason": reason,
-            "model_version": model_version,
-            "created_at": now.isoformat(),
-        }
-        self._store.write_json(f"{_HISTORY_PREFIX}/{now.strftime('%Y%m%d-%H%M%S')}.json", event)
-        self._store.write_json(_LAST_EVENT_KEY, event)
+        with self._db.session_scope() as session:
+            ScalingRepository(session).save_event(
+                predicted_demand=demand,
+                old_replica=old_replica,
+                new_replica=new_replica,
+                action=action,
+                reason=reason,
+                model_version=model_version,
+            )
