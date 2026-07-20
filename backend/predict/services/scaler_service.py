@@ -87,12 +87,10 @@ class ScalerService:
         if document is not None:
             decision = self._engine.decide(
                 # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-                # ScalingSignals(predicted_demand=document.total_predicted_demand)
                 ScalingSignals(predicted_demand=document.predicted_taxi_demand)
             )
             result.update(
                 # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-                # predicted_demand=document.total_predicted_demand,
                 predicted_demand=document.predicted_taxi_demand,
                 desired_replicas=decision.desired_replicas,
                 generated_at=document.generated_at,
@@ -165,7 +163,6 @@ class ScalerService:
             return
 
         # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-        # demand = document.total_predicted_demand
         demand = document.predicted_taxi_demand
         self.last_predicted_demand = demand
 
