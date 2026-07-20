@@ -1,0 +1,42 @@
+# call-api Deployment + Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hailcast-call-api
+  namespace: hailcast
+spec:
+  replicas: 2   # HPA/고정 — 트래픽에 맞춰 배포팀이 조정 가능(predict와 달리 상태 없음, 여러 개 떠도 안전)
+  selector:
+    matchLabels: { app: hailcast-call-api }
+  template:
+    metadata:
+      labels: { app: hailcast-call-api }
+    spec:
+      serviceAccountName: call-api-sa
+      containers:
+        - name: call-api
+          image: <ECR>/hailcast-dev-call-api:<GITHUB_SHA>
+          ports: [{ containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: hailcast-config }
+            - secretRef: { name: hailcast-rds-secret }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hailcast-call-api
+  namespace: hailcast
+spec:
+  selector: { app: hailcast-call-api }
+  ports: [{ port: 8000, targetPort: 8000 }]

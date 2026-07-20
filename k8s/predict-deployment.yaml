@@ -23,18 +23,25 @@ spec:
           ports: [{ containerPort: 8003 }]
           envFrom:
             - configMapRef: { name: hailcast-config }
-            - secretRef: { name: hailcast-secret }   # DB_PASSWORD
-          env:
-            - { name: KEDA_ENABLED, value: "true" }
-            - { name: K8S_NODES_ENABLED, value: "true" }   # 대시보드 노드 수(C2) — nodes ClusterRole 필요 (predict-rbac.yaml)
+            - secretRef: { name: hailcast-rds-secret }   # ESO가 채움: DB_USER/DB_PASSWORD (§8-2)
           livenessProbe:
-            httpGet: { path: /live, port: 8003 }
+            # ⚠️ 2026-07-20 정정: predict 실제 엔드포인트는 /healthz 하나뿐(/live, /ready 없음).
+            httpGet: { path: /healthz, port: 8003 }
             initialDelaySeconds: 10
             periodSeconds: 10
           readinessProbe:
-            httpGet: { path: /ready, port: 8003 }
+            httpGet: { path: /healthz, port: 8003 }
             initialDelaySeconds: 15
             periodSeconds: 15
           resources:
             requests: { cpu: 250m, memory: 512Mi }
             limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hailcast-predict
+  namespace: hailcast
+spec:
+  selector: { app: hailcast-predict }
+  ports: [{ port: 8003, targetPort: 8003 }]

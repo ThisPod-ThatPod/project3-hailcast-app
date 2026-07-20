@@ -1,0 +1,39 @@
+# weather-cron — 배포 방식(Deployment 상시 루프 vs CronJob) 팀 미확정이라 기본(Deployment) 형태로 둠.
+# CronJob으로 바꾸려면 command를 ["python", "fetch.py", "--once"]로 덮어쓰고 kind만 바꾸면 된다
+# (앱 코드가 이미 이중모드 지원 — backend/weather-cron/fetch.py).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hailcast-weather-cron
+  namespace: hailcast
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: hailcast-weather-cron }
+  template:
+    metadata:
+      labels: { app: hailcast-weather-cron }
+    spec:
+      serviceAccountName: weather-cron-sa
+      containers:
+        - name: weather-cron
+          image: <ECR>/hailcast-dev-weather-cron:<GITHUB_SHA>
+          ports: [{ containerPort: 8002 }]
+          envFrom:
+            - configMapRef: { name: hailcast-config }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8002 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hailcast-weather-cron
+  namespace: hailcast
+spec:
+  selector: { app: hailcast-weather-cron }
+  ports: [{ port: 8002, targetPort: 8002 }]

@@ -13,10 +13,9 @@ SERVICES ?= call-api predict worker weather-cron simulator   # frontend 는 서�
 help:       ## 명령 목록
 	@echo "  make build-push | teardown"
 
-build-push: ## docker build → ECR push (Phase 4에서 구현)
-	@echo "TODO(Phase 4): 각 서비스 docker build → ECR push"
-	@echo "  대상: $(SERVICES) / region: $(REGION)"
-	# 예) bash scripts/build_push.sh $(SERVICES)
+build-push: ## docker build → ECR push
+	@chmod +x scripts/build_push.sh
+	REGION=$(REGION) SERVICES="$(SERVICES)" bash scripts/build_push.sh
 
 # 로컬 도커 이미지·볼륨·캐시 정리 (다음 apply 를 깨끗하게)
 teardown:   ## 로컬 도커 자원 정리 (scripts/teardown_app.sh)

@@ -1,0 +1,32 @@
+# worker Deployment — KEDA 스케일 대상. 이름 반드시 hailcast-worker
+# (네이밍규약서 §8-1: ScaledObject의 scaleTargetRef·predict의 WORKER_DEPLOYMENT_NAME 계약).
+# HTTP 서버가 없는 순수 폴링 프로세스라 Service 없음.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hailcast-worker
+  namespace: hailcast
+spec:
+  replicas: 1   # KEDA(ScaledObject minReplicaCount)가 실제 값을 관리 — 초기값만
+  selector:
+    matchLabels: { app: hailcast-worker }
+  template:
+    metadata:
+      labels: { app: hailcast-worker }
+    spec:
+      serviceAccountName: worker-sa
+      containers:
+        - name: worker
+          image: <ECR>/hailcast-dev-worker:<GITHUB_SHA>
+          envFrom:
+            - configMapRef: { name: hailcast-config }
+            - secretRef: { name: hailcast-rds-secret }
+          # ⚠️ 07-14 논의에서 "probe 전략 미정"으로 남겨뒀던 항목 — HTTP 포트가 없어서
+          # exec probe로 프로세스 생존만 확인하는 잠정안. 팀 확정 전까지 임시로 이렇게 감.
+          livenessProbe:
+            exec: { command: ["pgrep", "-f", "worker.py"] }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
