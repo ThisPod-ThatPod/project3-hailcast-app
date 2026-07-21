@@ -22,7 +22,7 @@ spec:
           ports: [{ containerPort: 8003 }]
           envFrom:
             - configMapRef: { name: hailcast-config }
-            - secretRef: { name: hailcast-rds-secret }   # ESO가 채움: DB_USERNAME/DB_PASSWORD (§8-2)
+            - secretRef: { name: hailcast-rds-secret }   # ESO가 채움: DB_USER/DB_PASSWORD (§8-2)
           livenessProbe:
             # ⚠️ 2026-07-20 정정: predict 실제 엔드포인트는 /healthz 하나뿐(/live, /ready 없음).
             httpGet: { path: /healthz, port: 8003 }
