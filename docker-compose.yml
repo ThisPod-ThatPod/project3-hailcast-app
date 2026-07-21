@@ -65,21 +65,12 @@ services:
       MIN_TPS: "0"
       MAX_TPS: "200"
       GENERATOR_TICK_SECONDS: "0.2"
-      # --- SQS 직접 유입 (C3 — POST /simulator/sqs-inject) ---
-      AWS_REGION: ap-northeast-2
-      AWS_ENDPOINT_URL: http://localstack:4566
-      AWS_ACCESS_KEY_ID: test
-      AWS_SECRET_ACCESS_KEY: test
-      SQS_QUEUE_NAME: hailcast-dev-call-queue
-      SQS_AUTO_CREATE_QUEUE: "true"   # LocalStack 전용 (운영은 IaC가 큐 소유)
       LOG_LEVEL: INFO
     ports:
       - "8001:8001"
     depends_on:
       call-api:
         condition: service_started
-      localstack:
-        condition: service_healthy
 
   weather-cron:
     build:

@@ -7,10 +7,10 @@
 # =============================================================
 
 REGION   ?= ap-northeast-2
-SERVICES ?= call-api predict worker weather-cron simulator   # frontend 는 서빙방식 확정 후
+SERVICES ?= call-api predict worker weather-cron simulator frontend
 
 .PHONY: help dev-up dev-down dev-clean dev-rebuild dev-logs dev-ps dev-train \
-        build-push teardown
+        build-push deploy-all teardown teardown-infra
 
 help: ## 명령 목록
 	@echo ""
@@ -29,9 +29,13 @@ help: ## 명령 목록
 	@echo ""
 	@echo "  [ 운영 (AWS · 계정 가드 선행) ]"
 	@echo "  make build-push      docker build → ECR push (TAG=... 지정 가능)"
+	@echo "  make deploy-all      실인프라 배포 전체 자동화 (kubeconfig→build-push→"
+	@echo "                       AWS 값 조회→k8s apply→기동 대기, 재실행해도 안전)"
 	@echo ""
 	@echo "  [ 정리 ]"
 	@echo "  make teardown        로컬 도커 이미지·볼륨·캐시 정리 (CONFIRM=yes 시 실제 삭제)"
+	@echo "  make teardown-infra  실인프라(EKS) 배포분 전부 삭제 — hailcast 네임스페이스 +"
+	@echo "                       클러스터 RBAC (CONFIRM=yes 시 실제 삭제, 기본은 미리보기)"
 	@echo ""
 
 # ── 로컬 테스트 환경 (scripts/dev_local.sh) ────────────────
@@ -49,6 +53,16 @@ dev-train:   ; @bash scripts/dev_local.sh train
 build-push: ## docker build → ECR push
 	@SERVICES="$(SERVICES)" AWS_REGION="$(REGION)" bash scripts/build_push.sh
 
+# ── 운영 : 실인프라 배포 전체 자동화 (scripts/deploy_infra.sh) ──
+# docs/2026-07-20-app-deploy-guide.md 의 0~4단계를 한 번에 실행한다.
+deploy-all: ## 실인프라 배포(kubeconfig→build-push→apply→기동 대기) 한 번에
+	@AWS_REGION="$(REGION)" bash scripts/deploy_infra.sh
+
 # 로컬 도커 이미지·볼륨·캐시 정리 (다음 apply 를 깨끗하게)
 teardown:   ## 로컬 도커 자원 정리 (scripts/teardown_app.sh)
 	@bash scripts/teardown_app.sh
+
+# ── 정리 : 실인프라(EKS) 배포분 삭제 (scripts/teardown_infra.sh) ──
+# 기본은 미리보기만. 실제 삭제는 CONFIRM=yes.
+teardown-infra: ## 실인프라 배포분 삭제 — hailcast 네임스페이스 + 클러스터 RBAC
+	@CONFIRM="$(CONFIRM)" AWS_REGION="$(REGION)" bash scripts/teardown_infra.sh

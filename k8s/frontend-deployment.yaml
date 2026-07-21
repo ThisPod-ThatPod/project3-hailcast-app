@@ -1,0 +1,41 @@
+# frontend Deployment + Service — nginx가 정적 빌드 산출물을 서빙 (port 80)
+# ⚠️ 2026-07-20: 운영 서빙 방식(S3+CloudFront vs 이 nginx Pod) 최종 확정 아님 —
+# 오늘은 make deploy-all로 백엔드와 같이 테스트하기 위해 우선 이 방식으로 배포.
+# AWS API를 직접 호출하지 않아 IRSA/ServiceAccount 불필요(default SA로 충분).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hailcast-frontend
+  namespace: hailcast
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: hailcast-frontend }
+  template:
+    metadata:
+      labels: { app: hailcast-frontend }
+    spec:
+      containers:
+        - name: frontend
+          image: <ECR>/hailcast-dev-frontend:<GITHUB_SHA>
+          ports: [{ containerPort: 80 }]
+          livenessProbe:
+            httpGet: { path: /healthz, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: 80 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hailcast-frontend
+  namespace: hailcast
+spec:
+  selector: { app: hailcast-frontend }
+  ports: [{ port: 80, targetPort: 80 }]
