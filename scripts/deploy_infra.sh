@@ -137,7 +137,7 @@ if ! kubectl get secret hailcast-rds-secret -n "$NAMESPACE" &>/dev/null; then
         RDS_MASTER_PASS="$(echo "$RDS_MASTER_JSON" | jq -r .password)"
         kubectl create secret generic hailcast-rds-secret -n "$NAMESPACE" \
             --from-literal=DB_HOST="$RDS_HOST" \
-            --from-literal=DB_USERNAME="$RDS_MASTER_USER" \
+            --from-literal=DB_USER="$RDS_MASTER_USER" \
             --from-literal=DB_PASSWORD="$RDS_MASTER_PASS" \
             --dry-run=client -o yaml | kubectl apply -f -
         success "임시 hailcast-rds-secret 생성 완료 (ESO 설치되면 자동으로 교체됨)"
