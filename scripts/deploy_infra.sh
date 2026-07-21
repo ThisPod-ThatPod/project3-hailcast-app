@@ -118,25 +118,32 @@ if kubectl get crd externalsecrets.external-secrets.io &>/dev/null; then
     [ "$status" = "True" ] && success "ExternalSecret 동기화 완료" \
         || warning "ExternalSecret이 아직 SecretSynced 상태가 아닙니다 — 'kubectl get externalsecret -n ${NAMESPACE}'로 나중에 확인하세요."
 else
-    warning "ExternalSecret CRD 없음 — ESO 미설치(배포팀 목/금 예정). RDS Secret을 직접 만듭니다."
+    warning "ExternalSecret CRD 없음 — ESO 미설치. RDS Secret을 직접 만듭니다."
 fi
 
-# ── STEP 3.5 : ESO가 아직 hailcast-rds-secret 을 못 채웠으면 직접 만든다 ──
+# ── STEP 3.5 : ESO가 아직 hailcast-rds-secret 을 못 채웠으면 직접 만들어본다 ──
 # (ESO 설치 후엔 creationPolicy: Owner인 ExternalSecret이 이 Secret을 그대로 이어받아 관리한다.)
+# ⚠️ 2026-07-20: dev IAM 그룹(hailcast-devs)에 secretsmanager:GetSecretValue가 명시적으로
+# deny 돼있음(tfstate와 같은 보호 — RDS 마스터 비번은 dev 계정이 못 읽게 의도된 것으로 보임).
+# 이 경우 여기서 스크립트를 죽이지 않고 경고만 남기고 계속 진행한다 — DB 필요 없는 서비스
+# (weather-cron/simulator)는 정상 기동하고, DB 필요한 서비스(call-api/worker/predict)는
+# ESO 설치 전까지 CrashLoopBackOff가 나는 게 정상(예상된 상태)이다.
 if ! kubectl get secret hailcast-rds-secret -n "$NAMESPACE" &>/dev/null; then
-    info "hailcast-rds-secret 없음 → RDS 마스터 자격증명으로 임시 생성..."
-    RDS_MASTER_JSON="$(aws secretsmanager get-secret-value \
+    info "hailcast-rds-secret 없음 → RDS 마스터 자격증명으로 임시 생성 시도..."
+    if RDS_MASTER_JSON="$(aws secretsmanager get-secret-value \
         --secret-id "$RDS_MASTER_SECRET_ARN" --region "$AWS_REGION" \
-        --query SecretString --output text)" \
-        || error "RDS 마스터 시크릿 조회 실패 (${RDS_MASTER_SECRET_ARN})"
-    RDS_MASTER_USER="$(echo "$RDS_MASTER_JSON" | jq -r .username)"
-    RDS_MASTER_PASS="$(echo "$RDS_MASTER_JSON" | jq -r .password)"
-    kubectl create secret generic hailcast-rds-secret -n "$NAMESPACE" \
-        --from-literal=DB_HOST="$RDS_HOST" \
-        --from-literal=DB_USER="$RDS_MASTER_USER" \
-        --from-literal=DB_PASSWORD="$RDS_MASTER_PASS" \
-        --dry-run=client -o yaml | kubectl apply -f -
-    success "임시 hailcast-rds-secret 생성 완료 (ESO 설치되면 자동으로 교체됨)"
+        --query SecretString --output text 2>&1)"; then
+        RDS_MASTER_USER="$(echo "$RDS_MASTER_JSON" | jq -r .username)"
+        RDS_MASTER_PASS="$(echo "$RDS_MASTER_JSON" | jq -r .password)"
+        kubectl create secret generic hailcast-rds-secret -n "$NAMESPACE" \
+            --from-literal=DB_HOST="$RDS_HOST" \
+            --from-literal=DB_USERNAME="$RDS_MASTER_USER" \
+            --from-literal=DB_PASSWORD="$RDS_MASTER_PASS" \
+            --dry-run=client -o yaml | kubectl apply -f -
+        success "임시 hailcast-rds-secret 생성 완료 (ESO 설치되면 자동으로 교체됨)"
+    else
+        warning "RDS 마스터 시크릿 조회 실패(dev 계정은 GetSecretValue가 막혀있을 수 있음) — hailcast-rds-secret 없이 계속 진행합니다. call-api/worker/predict는 ESO 설치 전까지 DB 연결 실패로 재시작을 반복하는 게 정상입니다."
+    fi
 fi
 
 kubectl apply -f "$RENDER_DIR/predict-rbac.yaml"
@@ -145,6 +152,7 @@ kubectl apply -f "$RENDER_DIR/call-api-deployment.yaml"
 kubectl apply -f "$RENDER_DIR/worker-deployment.yaml"
 kubectl apply -f "$RENDER_DIR/weather-cron-deployment.yaml"
 kubectl apply -f "$RENDER_DIR/simulator-deployment.yaml"
+kubectl apply -f "$RENDER_DIR/frontend-deployment.yaml"
 kubectl apply -f "$RENDER_DIR/keda-triggerauthentication.yaml" \
     || warning "TriggerAuthentication apply 실패 — KEDA operator가 아직 설치 안 됐을 수 있음(배포팀 확인)."
 kubectl apply -f "$RENDER_DIR/worker-scaledobject.yaml" \

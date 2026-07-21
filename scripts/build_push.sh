@@ -70,14 +70,19 @@ aws ecr get-login-password --region "$AWS_REGION" \
 # ── 서비스별 build → push ──────────────────────────────────
 PUSHED=()
 for svc in $SERVICES; do
-    dockerfile="backend/${svc}/Dockerfile"
+    # frontend는 backend/의 다른 서비스들과 달리 레포 최상위에 있다(백엔드 공용 모듈이 없어서).
+    if [ "$svc" = "frontend" ]; then
+        dockerfile="frontend/Dockerfile"
+    else
+        dockerfile="backend/${svc}/Dockerfile"
+    fi
     repo="${NAME_PREFIX}-${svc}"                 # 규약서 §5-2
     image="${ECR_REGISTRY}/${repo}"
 
     echo ""
     info "───────── [${svc}] ${repo}:${TAG} ─────────"
 
-    [ -f "$APP_ROOT/$dockerfile" ] || error "${dockerfile} 없음 → 서비스명 오타이거나 아직 Dockerfile 미작성 (frontend 는 서빙방식 확정 후)"
+    [ -f "$APP_ROOT/$dockerfile" ] || error "${dockerfile} 없음 → 서비스명 오타이거나 아직 Dockerfile 미작성"
 
     # 리포지토리는 infra(Terraform)가 만든다. 여기서 몰래 만들면(create-repository)
     # 규약서 밖 리소스가 생기고 terraform destroy 로도 안 지워진다 → 없으면 중단이 맞다.

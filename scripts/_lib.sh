@@ -23,8 +23,9 @@ ENVIRONMENT="dev"
 NAME_PREFIX="${PROJECT_NAME}-${ENVIRONMENT}"   # hailcast-dev
 
 # ECR 리포지토리 이름 = ${NAME_PREFIX}-<서비스> (규약서 §5-2)
-# frontend 는 서빙 방식(nginx 파드) 확정 후 추가 — Dockerfile 이 아직 없다.
-DEFAULT_SERVICES="call-api predict worker weather-cron simulator"
+# ⚠️ frontend는 nginx Pod로 우선 포함(2026-07-20) — 운영 서빙 방식(S3+CloudFront 대안)은
+# 여전히 최종 확정 아님, make deploy-all 통합 테스트를 위해 일단 같이 배포한다.
+DEFAULT_SERVICES="call-api predict worker weather-cron simulator frontend"
 
 # ── 색상 출력 함수 ─────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
