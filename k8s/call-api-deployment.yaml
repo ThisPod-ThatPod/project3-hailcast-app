@@ -5,7 +5,7 @@ metadata:
   name: hailcast-call-api
   namespace: hailcast
 spec:
-  replicas: 2   # HPA/고정 — 트래픽에 맞춰 배포팀이 조정 가능(predict와 달리 상태 없음, 여러 개 떠도 안전)
+  replicas: 4   # 2026-07-22: simulator max_tps 200→600 인상에 맞춰 2→4로 증설(고정, HPA 아님 — predict와 달리 상태 없음, 여러 개 떠도 안전)
   selector:
     matchLabels: { app: hailcast-call-api }
   template:
@@ -29,8 +29,8 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { cpu: 500m, memory: 512Mi }
+            requests: { cpu: 200m, memory: 256Mi }
+            limits: { cpu: 1000m, memory: 768Mi }
 ---
 apiVersion: v1
 kind: Service
