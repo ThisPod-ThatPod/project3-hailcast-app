@@ -90,10 +90,12 @@ jobs:
           # 한 글자라도 다르면 ECR 에 없는 태그를 가리켜 ImagePullBackOff 가 난다.
           TAG="${GITHUB_SHA::7}"
 
-          # 매니페스트가 실제로 존재하는 2개만 대상이다.
-          # call-api·weather-cron 은 .gitkeep 뿐인 빈 디렉터리, simulator 는 디렉터리 자체가 없다.
-          # 나중에 매니페스트가 생기면 이 목록에 직접 추가해야 한다(빠뜨리면 그 서비스만 옛 이미지로 남는다).
-          for svc in predict worker; do
+          # 매니페스트가 실제로 존재하는 서비스만 대상이다.
+          # call-api 는 manifests #33 으로 추가되어 목록에 넣었다.
+          # weather-cron 은 아직 .gitkeep 뿐이고 simulator 는 디렉터리 자체가 없다.
+          # 매니페스트가 새로 생기면 이 목록에 직접 추가해야 한다.
+          # 빠뜨리면 빌드·push 는 되는데 태그만 안 바뀌어 그 서비스만 ImagePullBackOff 가 난다.
+          for svc in predict worker call-api; do
             f="apps/${svc}/deployment.yaml"
             [ -f "$f" ] || { echo "::error::${f} 가 없다. 경로 규약이 바뀌었는지 확인한다."; exit 1; }
 
