@@ -15,7 +15,7 @@ on:
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
-# 연속 머지 시 뒤엣것만 살린다. 고정 봇 브랜치를 동시에 건드리는 경합을 막고,
+# 연속 머지 시 뒤엣것만 살린다. 여러 실행이 manifests dev 로 동시에 push 하는 경합을 줄이고,
 # 항상 최신 SHA 가 배포되게 한다.
 concurrency:
   group: build-and-push-${{ github.ref }}
@@ -71,8 +71,6 @@ jobs:
       # ArgoCD 가 바라보는 브랜치와 반드시 같아야 한다(predict·worker·app-of-apps 전부 dev).
       # 다르면 태그가 갱신돼도 배포되지 않는다.
       BASE_BRANCH: dev
-      # 고정 이름이다. 매번 새 브랜치를 만들면 PR 이 무한 누적된다.
-      BOT_BRANCH: bot/image-tag-update
     steps:
       - name: Checkout manifests
         uses: actions/checkout@v4
@@ -81,7 +79,7 @@ jobs:
           ref: ${{ env.BASE_BRANCH }}
           # 크로스 레포라 기본 GITHUB_TOKEN 으로는 접근할 수 없다.
           token: ${{ secrets.MANIFESTS_PAT }}
-          # 얕은 클론에서 force push 하면 'shallow update not allowed' 로 막힐 수 있다.
+          # 얕은 클론에서는 아래 재시도의 rebase 가 제대로 동작하지 않는다.
           fetch-depth: 0
 
       - name: Update image tags
@@ -114,8 +112,10 @@ jobs:
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Commit & push to bot branch
-        id: commit
+      # 봇 브랜치+PR 방식은 'PR 이 열려 있는 동안 dev 가 전진하면 뒤처지는' 창이 생긴다.
+      # 실제로 그 창(70분)에 다른 PR 이 끼어들어 인접 라인 충돌이 났다.
+      # dev 로 바로 push 하면 체크아웃~push 간격이 몇 초라 그 창이 사실상 사라진다.
+      - name: Commit & push to dev
         env:
           TAG: ${{ steps.sed.outputs.tag }}
         run: |
@@ -124,56 +124,37 @@ jobs:
           # 이미 최신이면 커밋할 게 없다. 방치하면 git commit 이 실패해 job 이 빨개진다.
           if git diff --quiet; then
             echo "변경 없음 — 이미 ${TAG} 로 최신이다. 스킵한다."
-            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git config user.name  "hailcast-ci[bot]"
           git config user.email "hailcast-ci[bot]@users.noreply.github.com"
-
-          # base 에서 새로 파생시킨다 → PR diff 가 항상 '커밋 1개'로 깔끔하게 유지된다.
-          git checkout -B "$BOT_BRANCH"
           git add apps/predict/deployment.yaml apps/worker/deployment.yaml
 
-          # [skip ci]: 지금 manifests 에는 push 트리거 워크플로가 없어 당장은 무해하다.
+          # [skip ci]: 지금 manifests 에는 워크플로가 하나도 없어 당장은 무해하다.
           # 다만 PAT 로 push 하면 GitHub 의 기본 루프 방지가 걸리지 않으므로 미리 넣어 둔다.
           git commit \
             -m "chore(deploy): predict·worker 이미지 태그 ${TAG} 로 갱신 [skip ci]" \
             -m "app 레포 커밋: ${GITHUB_SHA}" \
             -m "워크플로: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
-          # 봇 전용 브랜치라 강제 갱신이 의도된 동작이다(항상 base + 커밋 1개).
-          git push --force origin "$BOT_BRANCH"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          # 체크아웃과 push 사이에 누가 dev 로 push 하면 non-fast-forward 로 거부된다.
+          # 그때는 rebase 로 따라잡고 다시 시도한다. 우리 변경은 이미지 2줄뿐이라
+          # 다른 파일 변경과는 깨끗하게 합쳐진다.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${BASE_BRANCH}"; then
+              echo "push 성공 (시도 ${attempt})"
+              exit 0
+            fi
 
-      - name: Open or update PR
-        if: steps.commit.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.MANIFESTS_PAT }}
-          TAG: ${{ steps.sed.outputs.tag }}
-        run: |
-          set -euo pipefail
+            echo "::warning::dev 가 전진했다. rebase 후 재시도한다 (${attempt}/3)"
+            if ! git pull --rebase origin "${BASE_BRANCH}"; then
+              git rebase --abort || true
+              echo "::error::rebase 충돌. dev 에서도 이미지 라인이 수정되었는지 확인한다."
+              exit 1
+            fi
+            sleep 5
+          done
 
-          # 열린 PR 이 이미 있으면 위 force push 로 내용이 갱신되었으므로 새로 만들지 않는다.
-          existing="$(gh pr list --repo "$MANIFESTS_REPO" --head "$BOT_BRANCH" \
-                        --state open --json number --jq '.[].number')"
-          if [ -n "$existing" ]; then
-            echo "기존 PR #${existing} 가 ${TAG} 로 갱신되었다."
-            exit 0
-          fi
-
-          cat > "$RUNNER_TEMP/pr-body.md" <<EOF
-          app 레포 \`${GITHUB_SHA}\` 빌드 결과를 반영한다.
-
-          - predict / worker 이미지 태그 → \`${TAG}\`
-          - 머지하면 ArgoCD 가 \`${BASE_BRANCH}\` 를 감지해 자동 롤아웃한다.
-
-          워크플로: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
-          EOF
-
-          gh pr create \
-            --repo "$MANIFESTS_REPO" \
-            --base "$BASE_BRANCH" \
-            --head "$BOT_BRANCH" \
-            --title "chore(deploy): 이미지 태그 갱신 (${TAG})" \
-            --body-file "$RUNNER_TEMP/pr-body.md"
+          echo "::error::3회 재시도 후에도 push 실패. dev 가 계속 전진 중인지 확인한다."
+          exit 1
