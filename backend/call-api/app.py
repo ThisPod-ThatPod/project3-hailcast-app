@@ -1,3 +1,7 @@
+# ECR Push 및 이미지 태그 자동 푸시 확인을 위해
+# 임의로 추가한 주석입니다.
+# 추후 삭제하셔도 상관 없습니다.
+
 # 7.1 콜 처리 API (FastAPI)
 # Entry Point — 라우터/예외 핸들러/DI 조립만 담당. Business Logic은 services/에 있다.
 import asyncio
