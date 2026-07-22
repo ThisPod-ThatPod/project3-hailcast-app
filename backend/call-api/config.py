@@ -13,9 +13,10 @@ class CallApiSettings(BaseAppSettings):
     # --- A1: 트래픽 집계 (이 파드의 콜 카운트를 FileStore shard로 내보내는 주기) ---
     traffic_flush_interval_seconds: float = 10.0
 
-    # --- D3: SQS 커넥션 풀 — TPS 200을 실제로 받아내려면 boto3 기본값(10)으로는 부족
+    # --- D3: SQS 커넥션 풀 — TPS를 실제로 받아내려면 boto3 기본값(10)으로는 부족
     # (오늘 로컬 테스트에서 "Connection pool is full"로 프로세스가 죽는 것 확인함) ---
-    aws_max_pool_connections: int = 250
+    # 2026-07-22: simulator max_tps를 200→600으로 올리면서 비례해서 같이 올림(250/200 비율 유지).
+    aws_max_pool_connections: int = 750
 
 
 @lru_cache

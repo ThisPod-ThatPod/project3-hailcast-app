@@ -11,12 +11,14 @@ class SimulatorSettings(BaseAppSettings):
     call_api_url: str = "http://localhost:8000"   # 실제 Call API (Dummy API 금지)
 
     # --- Traffic 제어 (k6 서브프로세스, simulator/k6/call_load.js) ---
-    # D1: 버튼 한 번 클릭 = TPS ±200. step과 max가 같아서 한 클릭으로 바로 상한(보호된
-    # 안전 용량)까지 켜지는 on/off에 가까운 동작이 된다 — call-api의 커넥션 풀도
-    # 이 상한을 실제로 받아낼 수 있게 같이 키워둠(D3, common/aws/client_factory.py).
+    # 2026-07-22: 버튼을 누른 만큼 200→400→600으로 누적되게 max_tps를 traffic_step의
+    # 3배로 늘림(원래 D1은 step==max로 on/off 토글이었는데, 여러 단계로 올려보는 테스트가
+    # 필요해져서 변경). call-api의 replica/CPU·커넥션 풀(D3, common/aws/client_factory.py,
+    # call-api/config.py::aws_max_pool_connections)도 이 상한에 맞춰 같이 올려뒀다 —
+    # 여기 값만 혼자 올리면 call-api가 못 버티고 죽는다(2026-07-22 실제 crash 확인함).
     traffic_step: float = 200.0      # increase/decrease 1회당 TPS 증감폭
     min_tps: float = 0.0             # 하한 (0 이하로 내려가지 않음, 0이면 k6 정지)
-    max_tps: float = 200.0           # 상한 (Call API/로컬 환경 보호)
+    max_tps: float = 600.0           # 상한 (call-api 증설 용량에 맞춤)
     k6_binary: str = "k6"            # PATH에 있는 k6 실행 파일명/경로
 
     # --- Status (A2) ---

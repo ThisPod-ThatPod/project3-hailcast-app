@@ -72,33 +72,29 @@ const STATS_POLL_INTERVAL_MS = 10000 // 상단 통계는 최소 10초마다 반�
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({ pods: null, traffic: 0, nodes: null })
 
+  const loadStats = () => {
+    fetch(`${API_BASE}/dashboard/summary`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: Partial<DashboardStats>) => {
+        setStats({ pods: data.pods ?? null, traffic: data.traffic ?? 0, nodes: data.nodes ?? null })
+      })
+      .catch(() => {
+        // 백엔드 미연결 상태 — 콘솔에 요청 실패가 보이는 게 정상. 연동되면 자동으로 채워짐.
+      })
+  }
+
   useEffect(() => {
-    let cancelled = false
-
-    const load = () => {
-      fetch(`${API_BASE}/dashboard/summary`)
-        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
-        .then((data: Partial<DashboardStats>) => {
-          if (cancelled) return
-          setStats({ pods: data.pods ?? null, traffic: data.traffic ?? 0, nodes: data.nodes ?? null })
-        })
-        .catch(() => {
-          // 백엔드 미연결 상태 — 콘솔에 요청 실패가 보이는 게 정상. 연동되면 자동으로 채워짐.
-        })
-    }
-
-    load()
-    const timer = setInterval(load, STATS_POLL_INTERVAL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
+    loadStats()
+    const timer = setInterval(loadStats, STATS_POLL_INTERVAL_MS)
+    return () => clearInterval(timer)
   }, [])
 
+  // 버튼 클릭 직후 다음 10초 폴링을 기다리지 않고 바로 재조회 — 눈에 보이는 반응 지연을 줄인다.
+  // (call-api의 트래픽 flush 주기 때문에 즉시 재조회해도 트래픽 값 자체는 몇 초 지연될 수 있음)
   const increaseTraffic = () =>
-    fetch(`${SIMULATOR_BASE}/simulator/increase`, { method: 'POST' }).catch(() => {})
+    fetch(`${SIMULATOR_BASE}/simulator/increase`, { method: 'POST' }).then(loadStats).catch(() => {})
   const decreaseTraffic = () =>
-    fetch(`${SIMULATOR_BASE}/simulator/decrease`, { method: 'POST' }).catch(() => {})
+    fetch(`${SIMULATOR_BASE}/simulator/decrease`, { method: 'POST' }).then(loadStats).catch(() => {})
   // "SQS 메시지 유입" — simulator의 지속 TPS 제어와 별개로, call-api에 콜 1건을 바로 보내
   // SQS에 1회성으로 메시지를 넣어보는 버튼 (대응하는 simulator 전용 엔드포인트는 없음).
   const injectSqs = () =>
@@ -111,8 +107,8 @@ export default function DashboardPage() {
         destination: '홍대입구역',
         source: 'api',
       }),
-    }).catch(() => {})
-  const reset = () => fetch(`${SIMULATOR_BASE}/simulator/reset`, { method: 'POST' }).catch(() => {})
+    }).then(loadStats).catch(() => {})
+  const reset = () => fetch(`${SIMULATOR_BASE}/simulator/reset`, { method: 'POST' }).then(loadStats).catch(() => {})
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
