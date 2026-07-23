@@ -35,8 +35,9 @@ class PredictSettings(BaseAppSettings):
     # 로컬(LocalStack) 버킷 자동 생성
     s3_auto_create_bucket: bool = False
 
-    # --- A1: 트래픽 집계 (call-api 각 파드의 shard를 모아 합산, 10초마다) ---
-    traffic_aggregate_interval_seconds: float = 10.0
+    # --- A1: 트래픽 집계 (call-api 각 파드의 shard를 모아 합산) ---
+    # 2026-07-23: call-api flush 주기(2초)에 맞춰 같이 단축 — 둘 중 하나만 빠르면 의미 없음.
+    traffic_aggregate_interval_seconds: float = 2.0
 
     # --- Predictive Scaling (G1) ---
     scaling_interval_seconds: float = 60.0        # Prediction Interval과 독립 주기

@@ -11,7 +11,9 @@ class CallApiSettings(BaseAppSettings):
     # 로컬(LocalStack/moto)에서 버킷 자동 생성 허용 여부.
     s3_auto_create_bucket: bool = False
     # --- A1: 트래픽 집계 (이 파드의 콜 카운트를 FileStore shard로 내보내는 주기) ---
-    traffic_flush_interval_seconds: float = 10.0
+    # 2026-07-23: 트래픽 증가 버튼 클릭 후 화면 반영 지연 줄이려고 10→2초로 단축.
+    # S3 쓰기 횟수가 5배 늘지만 지금 규모(call-api 4개 파드)에선 비용/부하 영향 미미.
+    traffic_flush_interval_seconds: float = 2.0
 
     # --- D3: SQS 커넥션 풀 — TPS를 실제로 받아내려면 boto3 기본값(10)으로는 부족
     # (오늘 로컬 테스트에서 "Connection pool is full"로 프로세스가 죽는 것 확인함) ---
