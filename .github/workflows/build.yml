@@ -90,14 +90,28 @@ jobs:
           # 한 글자라도 다르면 ECR 에 없는 태그를 가리켜 ImagePullBackOff 가 난다.
           TAG="${GITHUB_SHA::7}"
 
-          # 매니페스트가 실제로 존재하는 서비스만 대상이다.
-          # call-api 는 manifests #33 으로 추가되어 목록에 넣었다.
-          # weather-cron 은 아직 .gitkeep 뿐이고 simulator 는 디렉터리 자체가 없다.
-          # 매니페스트가 새로 생기면 이 목록에 직접 추가해야 한다.
-          # 빠뜨리면 빌드·push 는 되는데 태그만 안 바뀌어 그 서비스만 ImagePullBackOff 가 난다.
-          for svc in predict worker call-api; do
-            f="apps/${svc}/deployment.yaml"
-            [ -f "$f" ] || { echo "::error::${f} 가 없다. 경로 규약이 바뀌었는지 확인한다."; exit 1; }
+          # 대상 서비스를 하드코딩하지 않고 manifests 에서 직접 찾는다.
+          # 목록을 손으로 관리하면 매니페스트가 새로 생겼을 때 빠뜨리기 쉽고, 그러면
+          # CI 는 초록불인데 그 서비스만 옛 태그로 남아 조용히 깨진다(call-api 사례).
+          # build matrix 와 동일해야 한다. 여기 없는 서비스는 ECR 에 이미지가 없다.
+          BUILT="call-api worker predict simulator weather-cron"
+
+          updated=0
+          for f in apps/*/deployment.yaml; do
+            [ -e "$f" ] || continue
+            svc="$(basename "$(dirname "$f")")"
+
+            # 이미지 라인이 없는 매니페스트(예: Job/CronJob 만 있는 경우)는 대상이 아니다.
+            grep -q "hailcast-dev-${svc}:" "$f" || {
+              echo "::notice file=${f}::hailcast-dev-${svc} 이미지 라인이 없어 건너뛴다."
+              continue
+            }
+
+            # 빌드하지 않는 서비스의 태그를 갱신하면 ECR 에 없는 이미지를 가리키게 된다.
+            case " $BUILT " in
+              *" $svc "*) ;;
+              *) echo "::error file=${f}::${svc} 는 build matrix 에 없다. 이미지가 없어 배포가 깨진다."; exit 1 ;;
+            esac
 
             # 패턴을 <GITHUB_SHA> 리터럴로 잡으면 1회차에 플레이스홀더가 사라져 2회차부터
             # 아무것도 매칭되지 않고 '조용히' 실패한다. 이미지 라인을 통째로 잡아 태그만 교체한다.
@@ -110,7 +124,17 @@ jobs:
             # 치환 실패를 그냥 넘기면 옛 이미지가 계속 배포된다. 반드시 job 을 실패시킨다.
             grep -q "hailcast-dev-${svc}:${TAG}" "$f" \
               || { echo "::error file=${f}::이미지 태그 치환 실패. 이미지 라인 형식이 바뀌었는지 확인한다."; exit 1; }
+
+            # 검증한 파일을 그 자리에서 스테이징한다. 커밋 스텝에 파일 목록을 또 적으면
+            # 한쪽만 고치고 다른 쪽을 빠뜨려 '치환은 됐는데 커밋만 안 되는' 누락이 난다.
+            git add "$f"
+            updated=$((updated + 1))
+            echo "  ${svc} → ${TAG}"
           done
+
+          # 하나도 못 찾았다면 경로 규약이 바뀐 것이다. 조용히 넘어가면 안 된다.
+          [ "$updated" -gt 0 ] \
+            || { echo "::error::갱신 대상 매니페스트를 찾지 못했다. apps/<svc>/deployment.yaml 규약을 확인한다."; exit 1; }
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
@@ -123,20 +147,25 @@ jobs:
         run: |
           set -euo pipefail
 
+          # 파일은 앞 스텝에서 이미 스테이징됐다. --cached 로 봐야 감지된다.
           # 이미 최신이면 커밋할 게 없다. 방치하면 git commit 이 실패해 job 이 빨개진다.
-          if git diff --quiet; then
+          if git diff --cached --quiet; then
             echo "변경 없음 — 이미 ${TAG} 로 최신이다. 스킵한다."
             exit 0
           fi
 
           git config user.name  "hailcast-ci[bot]"
           git config user.email "hailcast-ci[bot]@users.noreply.github.com"
-          git add apps/predict/deployment.yaml apps/worker/deployment.yaml
+
+          # 어떤 서비스가 바뀌었는지는 스테이징된 파일에서 뽑는다.
+          # 커밋 메시지에 서비스명을 하드코딩하면 목록이 늘 때 또 어긋난다.
+          # 구분자는 ASCII 로 둔다. paste -d 는 멀티바이트(·)를 바이트 단위로 잘라 메시지가 깨진다.
+          svcs="$(git diff --cached --name-only | sed -E 's|apps/([^/]+)/.*|\1|' | sort -u | paste -sd, -)"
 
           # [skip ci]: 지금 manifests 에는 워크플로가 하나도 없어 당장은 무해하다.
           # 다만 PAT 로 push 하면 GitHub 의 기본 루프 방지가 걸리지 않으므로 미리 넣어 둔다.
           git commit \
-            -m "chore(deploy): predict·worker 이미지 태그 ${TAG} 로 갱신 [skip ci]" \
+            -m "chore(deploy): ${svcs} 이미지 태그 ${TAG} 로 갱신 [skip ci]" \
             -m "app 레포 커밋: ${GITHUB_SHA}" \
             -m "워크플로: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
