@@ -18,6 +18,14 @@ class CallRepository(BaseRepository):
         except SQLAlchemyError as exc:
             raise self._wrap("select_call", exc) from exc
 
+    def get_recent(self, limit: int) -> list[Call]:
+        """RDS 테이블 뷰어용 — 최근 접수된 콜 최대 limit개 (최신순)."""
+        try:
+            stmt = select(Call).order_by(Call.requested_at.desc()).limit(limit)
+            return list(self._session.execute(stmt).scalars())
+        except SQLAlchemyError as exc:
+            raise self._wrap("select_recent_calls", exc) from exc
+
     def insert_from_message(self, message: CallMessage, status: str, receive_count: int) -> Call:
         """SQS 메시지를 Call 레코드로 저장한다 (commit은 Service의 session_scope가 수행)."""
         req = message.data

@@ -147,8 +147,8 @@ if ! kubectl get secret hailcast-rds-secret -n "$NAMESPACE" &>/dev/null; then
 fi
 
 kubectl apply -f "$RENDER_DIR/predict-rbac.yaml"
-# predict-deployment.yaml은 2026-07-22부터 배포팀 ArgoCD(apps/predict)가 소유 — 여기서 안 올림(중복 실행 방지).
-kubectl apply -f "$RENDER_DIR/call-api-deployment.yaml"
+# predict-deployment.yaml은 2026-07-22부터, call-api-deployment.yaml은 2026-07-23부터
+# 배포팀 ArgoCD(apps/predict, apps/call-api)가 소유 — 여기서 안 올림(중복 실행/되돌림 방지).
 kubectl apply -f "$RENDER_DIR/worker-deployment.yaml"
 kubectl apply -f "$RENDER_DIR/weather-cron-deployment.yaml"
 kubectl apply -f "$RENDER_DIR/simulator-deployment.yaml"

@@ -3,9 +3,9 @@
 # [복원 2026-07-13] B — 스키마(B1)가 pickup/destination을 텍스트로 단순화되면서
 # backend/frontend-contract/call_router.py에 격리해뒀던 걸 반영해 다시 연결함.
 # GET /call/{id}는 C(worker) 완료로 다시 실데이터를 반환한다.
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from common.models.call import CallRequest, CallResponse, CallStatusResponse
+from common.models.call import CallRecord, CallRequest, CallResponse, CallStatusResponse
 
 from dependencies import get_call_query_service, get_call_service
 from services.call_service import CallQueryService, CallService
@@ -31,6 +31,15 @@ def get_call_status(
         # Worker가 아직 처리하지 않았거나(QUEUED 상태는 기록 안 함) 존재하지 않는 요청
         raise HTTPException(status_code=404, detail="call not found (not processed yet)")
     return result
+
+
+@router.get("/calls/recent", response_model=list[CallRecord])
+def get_recent_calls(
+    limit: int = Query(default=20, ge=1, le=100),
+    service: CallQueryService = Depends(get_call_query_service),
+) -> list[CallRecord]:
+    """RDS 테이블 뷰어용 — 최근 접수된 콜 최신순."""
+    return service.get_recent(limit)
 
 
 @router.get("/healthz")
