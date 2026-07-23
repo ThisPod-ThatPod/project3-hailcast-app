@@ -26,6 +26,8 @@ const STATS_POLL_INTERVAL_MS = 10000 // 상단 통계는 최소 10초마다 반�
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats>({ pods: null, traffic: 0, nodes: null })
+  // 트래픽 관련 버튼을 누를 때마다 값을 바꿔서 TrafficHistoryChart가 폴링 주기를 안 기다리고 즉시 재조회하게 한다.
+  const [trafficRefreshSignal, setTrafficRefreshSignal] = useState(0)
 
   const loadStats = () => {
     fetch(`${API_BASE}/dashboard/summary`)
@@ -44,12 +46,21 @@ export default function DashboardPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // 버튼 클릭 직후 다음 10초 폴링을 기다리지 않고 바로 재조회 — 눈에 보이는 반응 지연을 줄인다.
-  // (call-api의 트래픽 flush 주기 때문에 즉시 재조회해도 트래픽 값 자체는 몇 초 지연될 수 있음)
+  // 버튼 클릭 직후 다음 폴링을 기다리지 않고 바로 재조회 — 눈에 보이는 반응 지연을 줄인다.
+  // 트래픽 파이프라인(call-api flush 2초 + predict 집계 2초, 최악 4초)은 배치라 진짜 즉시는
+  // 아니라서, 클릭 즉시 1번 + 배치가 한 바퀴 돌 시점(4.5초 뒤) 1번 더 재조회한다.
+  const refreshTraffic = () => {
+    loadStats()
+    setTrafficRefreshSignal((n) => n + 1)
+    setTimeout(() => {
+      loadStats()
+      setTrafficRefreshSignal((n) => n + 1)
+    }, 4500)
+  }
   const increaseTraffic = () =>
-    fetch(`${SIMULATOR_BASE}/simulator/increase`, { method: 'POST' }).then(loadStats).catch(() => {})
+    fetch(`${SIMULATOR_BASE}/simulator/increase`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
   const decreaseTraffic = () =>
-    fetch(`${SIMULATOR_BASE}/simulator/decrease`, { method: 'POST' }).then(loadStats).catch(() => {})
+    fetch(`${SIMULATOR_BASE}/simulator/decrease`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
   // "SQS 메시지 유입" — simulator의 지속 TPS 제어와 별개로, call-api에 콜 1건을 바로 보내
   // SQS에 1회성으로 메시지를 넣어보는 버튼 (대응하는 simulator 전용 엔드포인트는 없음).
   const injectSqs = () =>
@@ -62,8 +73,8 @@ export default function DashboardPage() {
         destination: '홍대입구역',
         source: 'api',
       }),
-    }).then(loadStats).catch(() => {})
-  const reset = () => fetch(`${SIMULATOR_BASE}/simulator/reset`, { method: 'POST' }).then(loadStats).catch(() => {})
+    }).then(refreshTraffic).catch(() => {})
+  const reset = () => fetch(`${SIMULATOR_BASE}/simulator/reset`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -110,7 +121,7 @@ export default function DashboardPage() {
         <div className="flex-1">
           <div className="mb-2 text-center text-sm text-gray-500">트래픽 증감 그래프</div>
           <div className="h-72 rounded-lg border border-gray-200 bg-white p-2">
-            <TrafficHistoryChart />
+            <TrafficHistoryChart refreshSignal={trafficRefreshSignal} />
           </div>
         </div>
         <div className="flex-1">
