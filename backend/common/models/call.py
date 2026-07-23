@@ -49,6 +49,16 @@ class CallStatusResponse(BaseModel):
     processed_at: datetime | None = None
 
 
+class CallRecord(BaseModel):
+    """RDS 테이블 뷰어용 — calls 테이블 한 행."""
+
+    call_id: str
+    status: str
+    requested_at: datetime
+    processed_at: datetime | None = None
+    receive_count: int
+
+
 class CallMessage(BaseModel):
     """SQS Message Body 스키마 (JSON). Request 전체를 보존한다."""
 

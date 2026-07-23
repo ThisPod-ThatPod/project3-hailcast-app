@@ -8,7 +8,7 @@ from common.core.logger import get_logger
 from common.core.metrics import QUEUE_PUBLISH_TOTAL, REQUEST_TOTAL, metrics
 from common.db.call_repository import CallRepository
 from common.db.database import Database
-from common.models.call import CallMessage, CallRequest, CallResponse, CallStatusResponse
+from common.models.call import CallMessage, CallRecord, CallRequest, CallResponse, CallStatusResponse
 
 from services.traffic_counter import TrafficCounter
 
@@ -67,3 +67,17 @@ class CallQueryService:
                 requested_at=call.requested_at,
                 processed_at=call.processed_at,
             )
+
+    def get_recent(self, limit: int) -> list[CallRecord]:
+        with self._db.session_scope() as session:
+            calls = CallRepository(session).get_recent(limit)
+            return [
+                CallRecord(
+                    call_id=c.call_id,
+                    status=c.status,
+                    requested_at=c.requested_at,
+                    processed_at=c.processed_at,
+                    receive_count=c.receive_count,
+                )
+                for c in calls
+            ]
