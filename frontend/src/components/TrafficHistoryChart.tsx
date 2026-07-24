@@ -34,7 +34,7 @@ export default function TrafficHistoryChart({ refreshSignal }: { refreshSignal?:
 
     const load = () => {
       fetch(
-        `${API_BASE}/dashboard/traffic-history?minutes=${WINDOW_MINUTES}&bucket_seconds=${BUCKET_SECONDS}`,
+        `${API_BASE}/api/dashboard/traffic-history?minutes=${WINDOW_MINUTES}&bucket_seconds=${BUCKET_SECONDS}`,
       )
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
         .then((data: TrafficPoint[]) => {

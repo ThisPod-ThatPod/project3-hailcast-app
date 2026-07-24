@@ -44,4 +44,20 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="HailCast Call API", version="0.1.0", lifespan=lifespan)
 register_cors(app, settings.cors_allow_origins)
 register_exception_handlers(app)
-app.include_router(call_router)
+
+# 경로 규칙(7/23 「나」안) — 외부에 노출되는 API 는 전부 /api 아래로 모은다.
+# 짝 매니페스트: manifests 브랜치 feature/predict-frontend-ingress-routing
+#   - apps/call-api/ingress.yaml : path /api/*   (group.order 20, catch-all)  → 이 서비스
+#   - apps/predict/ingress.yaml  : /api/dashboard·scaling·prediction (order 10) → predict
+# call-api 는 catch-all 이라, 예약 경로(predict 3개)에 안 걸린 /api/* 를 전부 받는다.
+# 접두어를 여기서 한 번에 붙이므로 라우터 파일은 서비스 경로만 알면 된다.
+# ⚠️ 배포 순서: 이 접두어 이동이 담긴 이미지가 배포되기 전에 위 Ingress 만 먼저 sync 되면
+#    앱이 아직 /api 를 몰라 모든 /api/* 가 404 다. 앱 이미지 태그 갱신 → 그 뒤 Ingress sync.
+app.include_router(call_router, prefix="/api")
+
+
+# Probe 전용 — 라우터 밖(루트)에 둔다. k8s Probe 와 Ingress 의 healthcheck-path(/healthz)가
+# 둘 다 루트를 본다. /api 아래로 들어가면(=/api/healthz) probe 가 404 → 파드 CrashLoop.
+@app.get("/healthz")
+def healthz() -> dict:
+    return {"status": "ok"}
