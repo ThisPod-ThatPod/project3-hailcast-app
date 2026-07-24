@@ -45,7 +45,7 @@ export default function PodForecastChart() {
   const [series, setSeries] = useState<PodPoint[]>(TIME_SKELETON)
 
   useEffect(() => {
-    fetch(`${API_BASE}/dashboard/pod-forecast?hours_history=${HOURS_HISTORY}&hours_forecast=${HOURS_FORECAST}`)
+    fetch(`${API_BASE}/api/dashboard/pod-forecast?hours_history=${HOURS_HISTORY}&hours_forecast=${HOURS_FORECAST}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data: { timestamp: string; predicted?: number; actual?: number }[]) => {
         // 문자열 그대로 비교하지 않는다 — 백엔드(밀리초 없음)와 JS Date.toISOString()(밀리초 포함)의

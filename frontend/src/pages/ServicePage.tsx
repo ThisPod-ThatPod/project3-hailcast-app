@@ -41,7 +41,7 @@ export default function ServicePage() {
     pollTimerRef.current = window.setInterval(async () => {
       attempts += 1
       try {
-        const res = await fetch(`${CALL_API_BASE}/call/${requestId}`)
+        const res = await fetch(`${CALL_API_BASE}/api/call/${requestId}`)
         if (res.ok) {
           const body = await res.json()
           if (body.status === 'DONE') {
@@ -66,7 +66,7 @@ export default function ServicePage() {
     stopPolling()
     setStatus('queued')
     try {
-      const res = await fetch(`${CALL_API_BASE}/call`, {
+      const res = await fetch(`${CALL_API_BASE}/api/call`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

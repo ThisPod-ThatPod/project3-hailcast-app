@@ -25,7 +25,10 @@ class SimulatorSettings(BaseAppSettings):
     # k6는 이 파드 안에서 서브프로세스로 뜨므로 항상 이 앱 자신(localhost:8001)으로 보낸다.
     # 포트는 Dockerfile EXPOSE/CMD·k8s Service와 동일하게 고정값(8001)이라 여기서도 고정값으로 둔다.
     # (call_api_url은 그대로 둔다 — relay 엔드포인트가 실제 call-api로 전달할 때 그 값을 쓴다.)
-    relay_url: str = "http://localhost:8001/simulator/_relay"
+    # _relay는 라우터(/api/simulator) 밖, 앱 루트(/_relay)에 있다 — ①로 /api/simulator/*가 외부에
+    # 열려도 인증 없는 relay가 딸려 열리지 않게 구조적으로 격리(simulator.py의 relay 핸들러 주석 참고).
+    # k6는 같은 파드 localhost로만 부르므로 ALB를 안 탄다.
+    relay_url: str = "http://localhost:8001/_relay"
     relay_timeout_seconds: float = 5.0
 
     # --- Status (A2) ---

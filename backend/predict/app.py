@@ -65,9 +65,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="HailCast Predict", version="0.1.0", lifespan=lifespan)
 register_cors(app, settings.cors_allow_origins)
 register_exception_handlers(app)
-app.include_router(prediction_router)
-app.include_router(scaling_router)
-app.include_router(dashboard_router)
+
+# 경로 규칙(7/23 「나」안) — 프론트가 부르는 API 는 /api 아래로 모은다.
+# 짝 매니페스트: manifests 브랜치 feature/predict-frontend-ingress-routing 의
+# apps/predict/ingress.yaml — /api/dashboard/*, /api/scaling/*, /api/prediction/* 를 predict 로
+# 보낸다. group.order 10 이라 call-api 의 /api/* catch-all(order 20)보다 먼저 평가된다.
+# 이 세 접두어가 그 Ingress 의 세 규칙과 1:1 로 맞아야 한다 — 여기를 바꾸면 Ingress 도 같이.
+app.include_router(prediction_router, prefix="/api")
+app.include_router(scaling_router, prefix="/api")
+app.include_router(dashboard_router, prefix="/api")
+
+# health_router(/health·/ready·/live)·/metrics·/healthz 는 루트에 남긴다.
+# 위 Ingress 가 예약한 건 /api/dashboard·scaling·prediction 뿐이라 이들은 ALB 리스너를 안 탄다:
+#   - /healthz : Ingress 의 healthcheck-path 가 타깃그룹에 직접 (리스너 규칙 아님)
+#   - /metrics : ServiceMonitor 가 파드를 직접 스크레이프
+#   - /health·/ready·/live : k8s Probe·compose healthcheck 가 파드로 직접
+# /api 아래로 넣으면 call-api 의 /api/* catch-all 로 잘못 흘러간다.
 app.include_router(health_router)
 
 
@@ -100,6 +113,8 @@ def metrics_endpoint() -> str:
     return "\n".join(lines) + "\n"
 
 
+# Probe 전용 — 루트 유지. k8s Probe 와 ALB healthcheck-path 가 이 경로를 본다.
+# (/metrics 도 ServiceMonitor 가 파드를 직접 긁으므로 ALB 를 안 타고 루트 그대로다)
 @app.get("/healthz")
 def healthz() -> dict:
     return {"status": "ok"}

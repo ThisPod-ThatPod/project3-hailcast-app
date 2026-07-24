@@ -114,7 +114,9 @@ class SimulatorService:
         self._state.record_generated()
         try:
             res = await self._relay_client.post(
-                f"{self._settings.call_api_url}/call",
+                # call_api_url은 클러스터 내부 Service 주소라 ALB를 안 타지만, /api 접두어는
+                # ALB가 아니라 call-api 앱이 갖고 있다(7/23 「나」안). 경로는 앱 기준으로 맞춘다.
+                f"{self._settings.call_api_url}/api/call",
                 content=body,
                 headers={"Content-Type": "application/json"},
             )

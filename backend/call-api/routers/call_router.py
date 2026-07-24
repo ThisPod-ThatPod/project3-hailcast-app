@@ -42,6 +42,7 @@ def get_recent_calls(
     return service.get_recent(limit)
 
 
-@router.get("/healthz")
-def healthz() -> dict:
-    return {"status": "ok"}
+# ⚠️ /healthz 를 여기에 되돌리지 말 것.
+# 이 라우터는 app.py 에서 prefix="/api" 로 마운트된다. /healthz 가 라우터 안에 있으면
+# /api/healthz 로 밀려나는데, Probe(k8s deployment)와 ALB healthcheck-path 는 둘 다
+# 루트 /healthz 를 본다 → 전 파드가 CrashLoop 로 죽는다. app.py 루트에 따로 있다.

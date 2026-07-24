@@ -158,7 +158,7 @@ env:
 |---|---|---|
 | **A. 이미 빌드 중** | `simulator`, `weather-cron` | 매니페스트만 올리면 **자동 편입** ✅ |
 | **B. 완전 신규** | 위 목록에 없고 소스가 `backend/` 아래 | **app 레포 작업이 먼저** 필요 ⚠️ |
-| **C. 소스가 `backend/` 밖** | **`frontend`** | **워크플로 수정 4곳** 필요 🔴 |
+| **C. 소스가 `backend/` 밖** | **`frontend`** | 워크플로 분기 **반영 완료** ✅ |
 
 이미 빌드 중인 서비스는 ECR에 이미지가 계속 올라가고 있어서, 매니페스트만 생기면 봇이 바로 태그를 채웁니다. 반면 신규 서비스는 **ECR에 이미지 자체가 없어서** 매니페스트만 올리면 배포가 실패합니다.
 
@@ -201,47 +201,27 @@ apps/frontend/deployment.yaml 이 먼저 생기면
 > 서비스명은 **app 레포 `ALL_SERVICES` · ECR 리포명 · manifests 디렉터리명** 세 곳에서 모두 같아야 합니다.
 > 하나라도 다르면 봇이 그 서비스를 못 찾습니다.
 
-### C(소스가 `backend/` 밖) — `frontend` 케이스 🔴
+### C(소스가 `backend/` 밖) — `frontend` 케이스 ✅ 반영 완료
 
-**`ALL_SERVICES`에 이름만 추가하면 안 됩니다.** 워크플로가 두 곳에서 `backend/` 경로를 전제하고 있기 때문입니다.
+`frontend`는 소스와 Dockerfile이 `backend/` 밖에 있어(`frontend/Dockerfile`) 다른 서비스와 처리가 다릅니다. 워크플로가 이를 분기해 처리하도록 이미 반영했습니다.
 
 ```
 다른 서비스:  backend/<서비스명>/Dockerfile
 frontend:     frontend/Dockerfile          ← 위치가 다름
 ```
 
-```yaml
-detect:  grep -qE "^backend/${s}/"                              # ← 하드코딩
-build:   docker build -f backend/${{ matrix.service }}/Dockerfile   # ← 하드코딩
-```
-
-#### 이름만 추가하면 이렇게 됩니다
-
-```
-평소:   frontend/ 를 고쳐도 detect 가 감지 못함
-        (트리거 paths 에도 frontend/** 가 없어 CI 자체가 안 돎)
-          ↓
-그러다: backend/common 변경 → build_all 발동 → matrix 에 frontend 포함
-          ↓
-        backend/frontend/Dockerfile 없음 → 빌드 실패
-          ↓
-        전체 job 실패 → 모든 서비스 매니페스트 갱신 정지
-```
-
-**평소엔 조용하다가 엉뚱한 시점에 터지는** 형태라 원인 찾기가 어렵습니다.
-
-#### 필요한 수정 4곳
+#### 반영된 4곳
 
 | # | 위치 | 내용 |
 |---|---|---|
 | 1 | 트리거 `paths` | `frontend/**` 추가 |
-| 2 | `detect` 스텝 | `^frontend/` 경로 매핑 추가 |
-| 3 | `build` 스텝 | Dockerfile 경로 분기 (`backend/` vs 루트) |
+| 2 | `detect` 스텝 | `frontend`는 `^frontend/`로, 나머지는 `^backend/<svc>/`로 매핑 |
+| 3 | `build` 스텝 | Dockerfile 경로 분기 (`frontend/Dockerfile` vs `backend/<svc>/Dockerfile`) |
 | 4 | `ALL_SERVICES` | `frontend` 추가 |
 
-ECR 리포지토리는 이미 준비돼 있습니다 (infra `modules/storage/variables.tf`의 `repositories` 기본값에 `frontend` 포함).
+**주의점 하나** — `frontend`는 `backend/common`을 COPY하지 않으므로, 공용 모듈이 바뀌어도 재빌드되지 않습니다(정적 nginx 이미지). detect 로직이 이를 구분합니다.
 
-> 이 수정은 **frontend 매니페스트를 만들 때 함께** 하면 됩니다. 그 전까지는 `ALL_SERVICES`에 넣지 마세요 — 넣는 순간 위 실패 경로가 열립니다.
+> **다른 서비스도 `backend/` 밖에 두려면** 위 4곳(특히 `detect`·`build`의 경로 분기)에 같은 방식으로 추가해야 합니다. 단순히 `ALL_SERVICES`에 이름만 넣으면 `backend/<svc>/Dockerfile`을 찾다 빌드가 실패하고, 그러면 전체 job이 멈춰 모든 매니페스트 갱신이 정지됩니다.
 
 ---
 

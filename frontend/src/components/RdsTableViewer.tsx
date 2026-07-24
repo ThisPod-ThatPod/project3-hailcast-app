@@ -22,7 +22,7 @@ export default function RdsTableViewer() {
 
   useEffect(() => {
     const load = () => {
-      fetch(`${CALL_API_BASE}/calls/recent?limit=${LIMIT}`)
+      fetch(`${CALL_API_BASE}/api/calls/recent?limit=${LIMIT}`)
         .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
         .then((data: CallRecord[]) => setRows(data))
         .catch(() => {

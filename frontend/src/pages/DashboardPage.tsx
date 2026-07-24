@@ -5,6 +5,10 @@ import RdsTableViewer from '../components/RdsTableViewer'
 
 // 백엔드 연동 지점 — predict/simulator/call-api가 서로 다른 서비스(포트)라 base URL을 따로 둔다.
 // 앞에 통합 게이트웨이가 생기기 전까지의 임시 구성.
+//
+// 경로의 /api 접두어는 base URL이 아니라 여기 경로에 둔다(7/23 「나」안).
+// 그래야 로컬(base=http://localhost:8003 → /api/dashboard/...)과
+// 운영(base='' → 같은 도메인 /api/dashboard/... → ALB가 predict로)이 같은 코드로 돈다.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const SIMULATOR_BASE = import.meta.env.VITE_SIMULATOR_BASE_URL ?? 'http://localhost:8001'
 const CALL_API_BASE = import.meta.env.VITE_CALL_API_BASE_URL ?? 'http://localhost:8000'
@@ -30,7 +34,7 @@ export default function DashboardPage() {
   const [trafficRefreshSignal, setTrafficRefreshSignal] = useState(0)
 
   const loadStats = () => {
-    fetch(`${API_BASE}/dashboard/summary`)
+    fetch(`${API_BASE}/api/dashboard/summary`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data: Partial<DashboardStats>) => {
         setStats({ pods: data.pods ?? null, traffic: data.traffic ?? 0, nodes: data.nodes ?? null })
@@ -58,13 +62,13 @@ export default function DashboardPage() {
     }, 4500)
   }
   const increaseTraffic = () =>
-    fetch(`${SIMULATOR_BASE}/simulator/increase`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
+    fetch(`${SIMULATOR_BASE}/api/simulator/increase`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
   const decreaseTraffic = () =>
-    fetch(`${SIMULATOR_BASE}/simulator/decrease`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
+    fetch(`${SIMULATOR_BASE}/api/simulator/decrease`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
   // "SQS 메시지 유입" — simulator의 지속 TPS 제어와 별개로, call-api에 콜 1건을 바로 보내
   // SQS에 1회성으로 메시지를 넣어보는 버튼 (대응하는 simulator 전용 엔드포인트는 없음).
   const injectSqs = () =>
-    fetch(`${CALL_API_BASE}/call`, {
+    fetch(`${CALL_API_BASE}/api/call`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -74,7 +78,7 @@ export default function DashboardPage() {
         source: 'api',
       }),
     }).then(refreshTraffic).catch(() => {})
-  const reset = () => fetch(`${SIMULATOR_BASE}/simulator/reset`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
+  const reset = () => fetch(`${SIMULATOR_BASE}/api/simulator/reset`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">

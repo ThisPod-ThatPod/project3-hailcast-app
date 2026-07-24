@@ -41,25 +41,32 @@ docker compose up --build          # postgres + localstack + 전 서비스
 docker compose run --rm ml-train   # LightGBM 학습 → S3 (최초 1회, --bootstrap 합성 데이터)
 
 # 데모: Simulator 버튼 → 전체 플로우
-curl -X POST localhost:8001/simulator/increase   # TPS +5
-curl -X POST localhost:8001/simulator/start
-curl localhost:8003/dashboard/summary            # 전체 상태 한 번에
+curl -X POST localhost:8001/api/simulator/increase   # TPS +5
+curl -X POST localhost:8001/api/simulator/start
+curl localhost:8003/api/dashboard/summary            # 전체 상태 한 번에
 ```
 
 ## API 목록
 
+경로 규칙(7/23 팀 결정 · 「나」안): **외부에 노출되는 API 는 전부 `/api` 아래**에 있다.
+ALB 가 `/api/*` 를 백엔드로, 나머지 `/*` 를 frontend 로 보낸다. 접두어는 각 서비스
+Entry Point(`app.include_router(..., prefix="/api")`)에서 붙는다.
+**Probe·모니터링 경로(`/healthz` `/health` `/ready` `/live` `/metrics`)는 루트에 남는다** —
+k8s Probe 와 ALB healthcheck-path 가 이 경로를 직접 보기 때문이다.
+
 | 서비스 | Endpoint | 설명 |
 |---|---|---|
-| call-api | `POST /call` | 콜 접수 → SQS → 즉시 202 (request_id) |
-| | `GET /call/{id}` | 처리 상태 조회 |
-| simulator | `POST /simulator/start·stop·increase·decrease·reset` | Traffic 제어 |
-| | `GET /simulator/status` | TPS·통계 (Frontend 폴링) |
-| weather-cron | `GET /weather/latest·history·status` | 날씨 조회 |
-| predict | `GET /prediction/latest·history·status` | 예측 조회 |
-| | `GET /scaling/status·history·current` | 스케일링 조회 |
-| | `GET /dashboard/summary·traffic·prediction·weather·scaling·worker` | 통합 Dashboard |
-| | `GET /health` `/ready` `/live` `/metrics` | 상태·Probe·Prometheus |
-| 공통 | `GET /healthz` | 서비스별 기본 헬스체크 |
+| call-api | `POST /api/call` | 콜 접수 → SQS → 즉시 202 (request_id) |
+| | `GET /api/call/{id}` | 처리 상태 조회 |
+| | `GET /api/calls/recent` | 최근 콜 목록 (RDS 테이블 뷰어) |
+| simulator | `POST /api/simulator/start·stop·increase·decrease·reset` | Traffic 제어 |
+| | `GET /api/simulator/status` | TPS·통계 (Frontend 폴링) |
+| weather-cron | `GET /weather/latest·history·status` | 날씨 조회 (ALB 미노출 · 접두어 없음) |
+| predict | `GET /api/prediction/latest·history·status` | 예측 조회 |
+| | `GET /api/scaling/status·history·current` | 스케일링 조회 |
+| | `GET /api/dashboard/summary·traffic·prediction·weather·scaling·worker` | 통합 Dashboard |
+| | `GET /health` `/ready` `/live` `/metrics` | 상태·Probe·Prometheus (루트 유지) |
+| 공통 | `GET /healthz` | 서비스별 기본 헬스체크 (루트 유지) |
 
 ## Scheduler (공통 베이스: backend/common/core/scheduler.py — 실패해도 다음 주기 정상 대기)
 
@@ -91,7 +98,7 @@ TPS 변경은 Generator 재생성 없이 즉시 반영, Call API 장애에도 Ge
 
 ## Dashboard
 
-`GET /dashboard/summary` 하나로 traffic(Simulator 프록시)·prediction·weather·scaling·worker(큐 적체/처리량/지연)·health 전체 반환. 부분 장애 시 해당 위젯만 `available:false`.
+`GET /api/dashboard/summary` 하나로 traffic(Simulator 프록시)·prediction·weather·scaling·worker(큐 적체/처리량/지연)·health 전체 반환. 부분 장애 시 해당 위젯만 `available:false`.
 
 ## 환경 변수 (주요 — 전체는 backend/common/core/settings.py + 서비스별 config.py)
 
@@ -113,8 +120,8 @@ Secret은 코드에 하드코딩하지 않는다 — 로컬 compose의 `test`/`h
 | 증상 | 확인 |
 |---|---|
 | `/ready` 503 | `docker compose run --rm ml-train` 실행했는지 (model check) · DB/LocalStack healthy 여부 |
-| 예측이 안 생김 | `GET /prediction/status`의 `last_error` · S3 `models/latest/` 존재 여부 |
-| 콜이 DB에 안 쌓임 | worker 로그 `worker_fail` · `GET /dashboard/worker`의 queue_backlog |
-| Scaling 안 됨 | `GET /scaling/status` — prediction 나이(`PREDICTION_MAX_AGE_SECONDS` 초과?) · cooldown 잔여 |
+| 예측이 안 생김 | `GET /api/prediction/status`의 `last_error` · S3 `models/latest/` 존재 여부 |
+| 콜이 DB에 안 쌓임 | worker 로그 `worker_fail` · `GET /api/dashboard/worker`의 queue_backlog |
+| Scaling 안 됨 | `GET /api/scaling/status` — prediction 나이(`PREDICTION_MAX_AGE_SECONDS` 초과?) · cooldown 잔여 |
 | 날씨 수집 실패 | `GET /weather/status`의 `last_error` (Open-Meteo 재시도 3회 후 다음 주기 재시도) |
 | 큐가 계속 쌓임 | worker 프로세스 수 부족 — KEDA(운영) 또는 `docker compose up -d --scale worker=3`(로컬) |
