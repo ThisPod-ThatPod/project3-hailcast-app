@@ -3,6 +3,8 @@
 # increase/decrease는 새 목표 TPS로 재시작한다(재시작 사이 짧은 공백은 감수).
 import asyncio
 
+import httpx
+
 from common.core.logger import get_logger
 from common.models.status import SimulatorStatus
 
@@ -12,6 +14,9 @@ from services.traffic_state import SimulatorState
 
 logger = get_logger("simulator_service")
 
+# [B-1] relay_call 전용 커넥션 풀 — max_tps(600)를 감당하려면 httpx 기본값(100/20)으로는 부족.
+_RELAY_CLIENT_LIMITS = httpx.Limits(max_connections=200, max_keepalive_connections=100)
+
 
 class SimulatorService:
     def __init__(self, state: SimulatorState, runner: K6Runner, settings: SimulatorSettings):
@@ -19,6 +24,9 @@ class SimulatorService:
         self._runner = runner
         self._settings = settings
         self._control_lock = asyncio.Lock()  # start/stop/increase/decrease/reset 동시 호출 직렬화
+        self._relay_client = httpx.AsyncClient(
+            timeout=settings.relay_timeout_seconds, limits=_RELAY_CLIENT_LIMITS
+        )
 
     async def start(self) -> SimulatorStatus:
         async with self._control_lock:
@@ -53,17 +61,22 @@ class SimulatorService:
 
     async def increase(self) -> SimulatorStatus:
         async with self._control_lock:
+            was_running = self._state.running
             before = self._state.current_tps
             tps = await self._state.adjust_tps(+self._settings.traffic_step)
-            if tps != before:  # 이미 상한(step==max_tps)이면 재시작 안 함 — 클릭해도 no-op
+            # [B-2, 2026-07-24] tps가 안 바뀌어도(이미 상한) stop() 이후라 안 도는 중이면
+            # 재시작해야 한다 — stop()이 current_tps를 리셋 안 하기 때문에, 예전엔 상한에서
+            # stop 후 increase를 눌러도 tps==before라 아무 반응이 없었다(진짜 버그).
+            if tps != before or not was_running:
                 await self._apply_rate(tps)
             return self._state.snapshot()
 
     async def decrease(self) -> SimulatorStatus:
         async with self._control_lock:
+            was_running = self._state.running
             before = self._state.current_tps
             tps = await self._state.adjust_tps(-self._settings.traffic_step)
-            if tps != before:  # 이미 하한(0)이면 재시작 안 함 — 클릭해도 no-op
+            if tps != before or not was_running:  # 이유는 increase()와 동일 (B-2)
                 await self._apply_rate(tps)
             return self._state.snapshot()
 
@@ -90,7 +103,35 @@ class SimulatorService:
     def status(self) -> SimulatorStatus:
         return self._state.snapshot()
 
+    async def relay_call(self, body: bytes) -> tuple[int, bytes]:
+        """[B-1, 2026-07-24] k6가 보낸 요청을 이 자리에서 실제 call-api로 전달하고,
+        성공/실패를 그 자리에서 카운트한다(traffic_state.py record_success/record_fail).
+
+        _control_lock을 안 쓴다 — 이건 초당 수백 건 호출되는 고빈도 경로라 start/stop/increase
+        같은 저빈도 제어 동작과 직렬화하면 그 자체가 병목이 된다. 통계 카운터는 원래도 락 없이
+        단순 증가로 설계돼 있다(traffic_state.py record_generated 주석 참고).
+        """
+        self._state.record_generated()
+        try:
+            res = await self._relay_client.post(
+                f"{self._settings.call_api_url}/call",
+                content=body,
+                headers={"Content-Type": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            self._state.record_fail()
+            logger.warning(f"relay to call-api failed: {exc}", extra={"event": "relay_failed"})
+            return 502, b'{"detail":"relay to call-api failed"}'
+        if res.status_code == 202:
+            self._state.record_success(queued=True)
+        elif res.status_code < 400:
+            self._state.record_success(queued=False)
+        else:
+            self._state.record_fail()
+        return res.status_code, res.content
+
     async def shutdown(self) -> None:
-        """앱 종료(lifespan) 시 k6 프로세스를 정리한다."""
+        """앱 종료(lifespan) 시 k6 프로세스 + relay HTTP 커넥션 풀을 정리한다."""
         async with self._control_lock:
             await self._stop_k6()
+        await self._relay_client.aclose()

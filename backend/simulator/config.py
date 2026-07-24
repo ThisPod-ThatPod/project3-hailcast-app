@@ -21,6 +21,13 @@ class SimulatorSettings(BaseAppSettings):
     max_tps: float = 600.0           # 상한 (call-api 증설 용량에 맞춤)
     k6_binary: str = "k6"            # PATH에 있는 k6 실행 파일명/경로
 
+    # --- B-1 (2026-07-24): k6가 call-api를 직접 안 때리고 simulator를 거쳐가게 변경 ---
+    # k6는 이 파드 안에서 서브프로세스로 뜨므로 항상 이 앱 자신(localhost:8001)으로 보낸다.
+    # 포트는 Dockerfile EXPOSE/CMD·k8s Service와 동일하게 고정값(8001)이라 여기서도 고정값으로 둔다.
+    # (call_api_url은 그대로 둔다 — relay 엔드포인트가 실제 call-api로 전달할 때 그 값을 쓴다.)
+    relay_url: str = "http://localhost:8001/simulator/_relay"
+    relay_timeout_seconds: float = 5.0
+
     # --- Status (A2) ---
     status_write_interval_seconds: float = 2.0   # FileStore(simulator/status.json) 갱신 주기
 

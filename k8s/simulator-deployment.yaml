@@ -24,10 +24,22 @@ spec:
           livenessProbe:
             httpGet: { path: /healthz, port: 8001 }
             initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 5  # [B-1, 2026-07-24] 최대부하(600rps)에서 CPU 1000m 줘도
+                                  # 여전히 순간적으로 이벤트루프가 밀려 기본 타임아웃/횟수로는
+                                  # 재시작되는 것 실측함 — 데모용 부하발생기라 잠깐의 헬스체크
+                                  # 지연 정도는 "죽음"으로 취급하지 않고 여유를 크게 둔다.
           resources:
-            requests: { cpu: 100m, memory: 256Mi }
-            limits: { cpu: 500m, memory: 512Mi }
+            # [B-1, 2026-07-24] k6가 call-api를 직결하던 걸 relay 경유로 바꾸면서 simulator
+            # 자신도 트래픽만큼 CPU를 쓰게 됨(전엔 거의 0) — call-api 증설 때와 같은 이유로 상향.
+            # 200m/1000m로도 600rps 피크에서 재시작 발생 실측 → 한 단계 더 올림.
+            # memory: 512Mi에서 최대부하(600rps) 램프 직후 OOMKilled(exitCode 137) 실측함 —
+            # k6 자체가 call_load.js의 maxVUs=rps*5(=3000 at 600rps)만큼 VU를 미리 할당하는데,
+            # 전엔 k6가 call-api를 직결해서 이 파드 자신은 거의 안 썼던 메모리를, relay 경유로
+            # 바뀌면서 FastAPI+httpx 커넥션풀 몫까지 같은 컨테이너 메모리에 더해 쓰게 됐다.
+            requests: { cpu: 300m, memory: 512Mi }
+            limits: { cpu: 2000m, memory: 1280Mi }
 ---
 apiVersion: v1
 kind: Service
