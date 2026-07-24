@@ -14,8 +14,11 @@ _STOP_TIMEOUT_SECONDS = 10
 
 
 class K6Runner:
-    def __init__(self, call_api_url: str, k6_binary: str = "k6"):
-        self._call_api_url = call_api_url
+    # target_url: k6가 실제로 때릴 주소. [B-1, 2026-07-24] call-api 직결이 아니라
+    # simulator 자신의 relay 엔드포인트(SimulatorSettings.relay_url)를 받는다 —
+    # call-api로의 실제 전달은 relay 안에서 SimulatorService가 처리한다.
+    def __init__(self, target_url: str, k6_binary: str = "k6"):
+        self._target_url = target_url
         self._binary = k6_binary
         self._process: subprocess.Popen | None = None
 
@@ -30,7 +33,7 @@ class K6Runner:
         None으로 남아 running=false와 실제 상태가 일치한다 (target tps만 앞서 갱신돼 있을 수 있음).
         """
         self.stop()
-        env = {**os.environ, "CALL_API_URL": self._call_api_url, "TARGET_RPS": f"{target_rps:g}"}
+        env = {**os.environ, "TARGET_URL": self._target_url, "TARGET_RPS": f"{target_rps:g}"}
         try:
             self._process = subprocess.Popen(
                 [self._binary, "run", str(_SCRIPT_PATH)],

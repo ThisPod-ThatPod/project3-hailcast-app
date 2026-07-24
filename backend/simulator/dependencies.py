@@ -21,7 +21,7 @@ def get_state() -> SimulatorState:
 @lru_cache
 def get_k6_runner() -> K6Runner:
     settings = get_settings()
-    return K6Runner(settings.call_api_url, settings.k6_binary)
+    return K6Runner(settings.relay_url, settings.k6_binary)
 
 
 @lru_cache

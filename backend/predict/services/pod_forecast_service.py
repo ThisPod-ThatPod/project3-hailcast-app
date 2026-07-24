@@ -62,6 +62,23 @@ class PodForecastService:
             return None
         return totals[closest]
 
+    def _predicted_for_bucket(self, document: PredictionDocument | None, bucket: datetime) -> int | None:
+        """[B-3, 2026-07-24] 그 버킷(target_time)에 대해 실제로 만들어진 예측을 찾는다.
+
+        예전엔 이 자리에서 document.predicted_taxi_demand(그 문서의 '첫 번째' 시간창 값,
+        생성 시점 기준)를 그대로 썼다 — prediction_interval_seconds(4시간) 주기라, 새 문서가
+        아직 안 나온 시간대엔 "지금 이 시간을 위해 미리 만든 예측"이 아니라 "그 순간 기준
+        가장 최신 예측"이 찍혀서, 사실상 actual과 거의 같은 신호를 두 번 찍는 꼴이었다.
+        미래 버킷(pod_forecast의 else 분기)과 동일하게 target_time 매칭으로 통일한다.
+        """
+        if document is None:
+            return None
+        totals = self._group_by_target_time(document)
+        demand = self._nearest_total(totals, bucket)
+        if demand is None:
+            return None
+        return self._predicted_replicas_for(demand)
+
     # ---------- BackupScheduler가 매시 정각 호출 ----------
     def snapshot_current_hour(self) -> None:
         bucket = _floor_to_hour(datetime.now(timezone.utc))
@@ -70,8 +87,7 @@ class PodForecastService:
         model_version: str | None = None
         document = self._reader.read_latest()
         if document is not None:
-            # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-            predicted_replicas = self._predicted_replicas_for(document.predicted_taxi_demand)
+            predicted_replicas = self._predicted_for_bucket(document, bucket)
             model_version = document.model_version
 
         actual_replicas: int | None = None
@@ -121,12 +137,7 @@ class PodForecastService:
             if bucket < now_bucket:
                 predicted, actual = history_by_bucket.get(bucket, (None, None))
             elif bucket == now_bucket:
-                predicted = (
-                    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-                    self._predicted_replicas_for(document.predicted_taxi_demand)
-                    if document is not None
-                    else None
-                )
+                predicted = self._predicted_for_bucket(document, bucket)
                 try:
                     actual = self._keda.get_actual_replicas()
                 except Exception:
