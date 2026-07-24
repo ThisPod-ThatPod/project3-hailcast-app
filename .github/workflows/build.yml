@@ -1,25 +1,40 @@
 # 9.1 build→ECR push (OIDC·SHA 태그) + manifests 이미지 태그 자동 반영 (안건 A / Option A1)
+#
+# 변경된 서비스만 빌드한다. 예전엔 한 줄만 고쳐도 5개를 전부 빌드·push 해서
+# 내용이 같은 이미지가 태그만 달리 ECR 에 쌓였다.
+#
+# ⚠️ 핵심 불변조건: 매니페스트는 '이번 실행에서 실제로 빌드된 서비스'만 갱신한다.
+#    빌드만 좁히고 매니페스트를 전부 갱신하면, 빌드 안 된 서비스가
+#    ECR 에 없는 태그를 가리켜 ImagePullBackOff 가 난다.
 name: build-and-push
 
 on:
   push:
-    # dev: 배포 흐름의 시작점(여기 머지되면 manifests 로 PR 이 나간다).
+    # dev: 배포 흐름의 시작점(여기 머지되면 manifests 가 갱신된다).
     # main: 이미지만 빌드해 둔다(아래 update-manifests 는 dev 에서만 돈다).
     branches: [main, dev]
-    # 문서·프론트만 고친 커밋까지 빌드하면 SHA 태그가 바뀌어 파드가 불필요하게 재시작된다.
+    # 1차 거름망. 여기 걸려도 아래 detect 가 서비스 단위로 한 번 더 좁힌다.
+    # 루트 common/·predict/ 는 레포에 존재하지 않는 잔재라 제거했다(어떤 Dockerfile 도 COPY 하지 않음).
     paths:
       - 'backend/**'
-      - 'common/**'
       - 'ml/**'
-      - 'predict/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
-# 연속 머지 시 뒤엣것만 살린다. 여러 실행이 manifests dev 로 동시에 push 하는 경합을 줄이고,
-# 항상 최신 SHA 가 배포되게 한다.
+# 같은 브랜치의 실행을 직렬화해 manifests dev 로 동시에 push 하는 경합을 줄인다.
+#
+# ⚠️ cancel-in-progress 는 false 여야 한다. 위의 '변경된 서비스만 빌드' 와 짝이다.
+#    취소하면 이렇게 된다:
+#      Push A(worker 수정) 빌드 중 → Push B(call-api 수정) 가 A 를 취소
+#      → B 의 diff 는 call-api 뿐 → worker 는 이번에도, 아까도 빌드되지 않음
+#      → worker 코드는 dev 에 있는데 그 SHA 의 이미지가 ECR 에 없고
+#        매니페스트는 옛 태그를 유지한다(안전장치 8번이 정상 동작한 결과).
+#      → 에러 하나 없이 worker 변경만 영영 배포되지 않는다.
+#    예전에는 매 실행이 5개를 전부 빌드해서 뒤 실행이 취소분을 덮어줬기 때문에 안전했다.
+#    변경 감지를 넣으면서 그 전제가 사라졌다.
 concurrency:
   group: build-and-push-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   id-token: write   # OIDC — 장기 AWS 키 없이 AssumeRole
@@ -27,13 +42,83 @@ permissions:
 
 env:
   AWS_REGION: ap-northeast-2
+  # 빌드 대상 전체 목록. 새 서비스는 여기 먼저 추가한 뒤 매니페스트를 올린다.
+  ALL_SERVICES: call-api worker predict simulator weather-cron
 
 jobs:
+  # ── 이번 커밋이 실제로 건드린 서비스 판별 ──
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.d.outputs.services }}    # JSON 배열 (matrix 용)
+      list: ${{ steps.d.outputs.list }}            # 공백 구분 (스크립트 용)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 이전 커밋과 비교해야 하므로 전체 이력이 필요하다.
+          fetch-depth: 0
+
+      - name: Detect changed services
+        id: d
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+
+          # 판단 근거가 없으면 안전하게 전부 빌드한다.
+          #   - workflow_dispatch: 비교할 이전 커밋이 없다
+          #   - 새 브랜치 최초 push: before 가 0000...
+          #   - force push 등으로 before 커밋이 사라진 경우
+          if [ "${{ github.event_name }}" != "push" ] \
+             || [ -z "$BEFORE" ] \
+             || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "비교 기준 없음 → 전체 빌드"
+            changed="$ALL_SERVICES"
+          else
+            files="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
+            echo "변경 파일:"; echo "$files" | sed 's/^/  /'
+
+            build_all=false
+            # backend/common 은 5개 서비스가 모두 COPY 한다 → 전부 재빌드해야 한다.
+            echo "$files" | grep -qE '^backend/common/' && build_all=true
+            # 워크플로가 바뀌면 판별 규칙 자체가 달라질 수 있다 → 안전하게 전부.
+            echo "$files" | grep -qE '^\.github/workflows/build\.yml$' && build_all=true
+
+            if $build_all; then
+              changed="$ALL_SERVICES"
+            else
+              changed=""
+              for s in $ALL_SERVICES; do
+                echo "$files" | grep -qE "^backend/${s}/" && changed="$changed $s"
+              done
+              # predict 만 루트 ml/ 을 COPY 한다(Dockerfile: COPY ml /app/ml).
+              if echo "$files" | grep -qE '^ml/'; then
+                case " $changed " in *" predict "*) ;; *) changed="$changed predict" ;; esac
+              fi
+            fi
+          fi
+
+          changed="$(echo $changed | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+
+          if [ -z "$changed" ]; then
+            # 루트 common/·predict/ 처럼 어떤 Dockerfile 도 COPY 하지 않는 경로만 바뀐 경우.
+            # 이미지 내용이 달라지지 않으므로 빌드하지 않는다.
+            echo "빌드 대상 없음 — 이미지에 영향 주는 변경이 없다."
+            echo "services=[]" >> "$GITHUB_OUTPUT"
+            echo "list=" >> "$GITHUB_OUTPUT"
+          else
+            echo "빌드 대상: $changed"
+            echo "services=$(printf '%s\n' $changed | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+            echo "list=$changed" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: detect
+    if: needs.detect.outputs.services != '[]'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [call-api, worker, predict, simulator, weather-cron]
+        service: ${{ fromJSON(needs.detect.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,24 +138,26 @@ jobs:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE: hailcast-dev-${{ matrix.service }}
         run: |
-          # build context = 레포 루트 (common/·ml/ 공유 모듈 COPY)
+          # build context = 레포 루트 (backend/common·ml 공유 모듈 COPY)
           docker build -f backend/${{ matrix.service }}/Dockerfile \
             -t "$REGISTRY/$IMAGE:${GITHUB_SHA::7}" .
           docker push "$REGISTRY/$IMAGE:${GITHUB_SHA::7}"
 
   # ── manifests 레포에 새 SHA 태그 반영 (안건 A) ──
-  # matrix 안이 아니라 별도 job 이다. matrix 5개가 동시에 같은 레포로 push 하면 충돌한다.
-  # needs: build 로 5개 빌드가 모두 끝난 뒤 '한 번만' 순차 실행된다.
+  # matrix 안이 아니라 별도 job 이다. matrix 가 동시에 같은 레포로 push 하면 충돌한다.
+  # needs: build 로 빌드가 모두 끝난 뒤 '한 번만' 순차 실행된다.
   update-manifests:
-    needs: build
+    needs: [detect, build]
     runs-on: ubuntu-latest
     # 배포 경로는 app dev → manifests dev 하나뿐이다. main push 는 이미지만 만들고 끝낸다.
     if: github.ref == 'refs/heads/dev'
     env:
       MANIFESTS_REPO: ThisPod-ThatPod/project3-hailcast-manifests
-      # ArgoCD 가 바라보는 브랜치와 반드시 같아야 한다(predict·worker·app-of-apps 전부 dev).
+      # ArgoCD 가 바라보는 브랜치와 반드시 같아야 한다.
       # 다르면 태그가 갱신돼도 배포되지 않는다.
       BASE_BRANCH: dev
+      # 이번 실행에서 실제로 빌드된 서비스. 이 목록만 갱신한다.
+      BUILT: ${{ needs.detect.outputs.list }}
     steps:
       - name: Checkout manifests
         uses: actions/checkout@v4
@@ -90,27 +177,29 @@ jobs:
           # 한 글자라도 다르면 ECR 에 없는 태그를 가리켜 ImagePullBackOff 가 난다.
           TAG="${GITHUB_SHA::7}"
 
-          # 대상 서비스를 하드코딩하지 않고 manifests 에서 직접 찾는다.
-          # 목록을 손으로 관리하면 매니페스트가 새로 생겼을 때 빠뜨리기 쉽고, 그러면
-          # CI 는 초록불인데 그 서비스만 옛 태그로 남아 조용히 깨진다(call-api 사례).
-          # build matrix 와 동일해야 한다. 여기 없는 서비스는 ECR 에 이미지가 없다.
-          BUILT="call-api worker predict simulator weather-cron"
-
+          # 대상 목록을 따로 적지 않고 매니페스트를 직접 훑는다.
+          # 목록을 두 곳에서 관리하면 한쪽만 고쳐 조용히 누락된다(실제로 call-api 가 그랬다).
+          shopt -s nullglob
           updated=0
           for f in apps/*/deployment.yaml; do
-            [ -e "$f" ] || continue
             svc="$(basename "$(dirname "$f")")"
 
-            # 이미지 라인이 없는 매니페스트(예: Job/CronJob 만 있는 경우)는 대상이 아니다.
-            grep -q "hailcast-dev-${svc}:" "$f" || {
-              echo "::notice file=${f}::hailcast-dev-${svc} 이미지 라인이 없어 건너뛴다."
-              continue
-            }
+            # 우리 ECR 이미지 라인이 없으면 대상이 아니다(사이드카·외부 이미지 등).
+            grep -qE "image:[[:space:]]*[^[:space:]]*hailcast-dev-${svc}:" "$f" || continue
 
-            # 빌드하지 않는 서비스의 태그를 갱신하면 ECR 에 없는 이미지를 가리키게 된다.
+            # ① 아예 빌드 대상이 아닌 서비스 → 매니페스트가 먼저 올라온 것이다.
+            #    그대로 두면 ECR 에 없는 이미지를 가리키게 되므로 여기서 멈춘다.
+            #    조치: app 레포 ALL_SERVICES 에 먼저 추가한 뒤 매니페스트를 올린다.
+            case " $ALL_SERVICES " in
+              *" $svc "*) ;;
+              *) echo "::error file=${f}::${svc} 가 빌드 대상(ALL_SERVICES)에 없다. app 레포에 먼저 추가한다."; exit 1 ;;
+            esac
+
+            # ② 빌드 대상이지만 이번 커밋에서 안 바뀐 서비스 → 기존 태그를 그대로 둔다.
+            #    이번 SHA 로는 그 서비스 이미지가 빌드되지 않았기 때문이다.
             case " $BUILT " in
               *" $svc "*) ;;
-              *) echo "::error file=${f}::${svc} 는 build matrix 에 없다. 이미지가 없어 배포가 깨진다."; exit 1 ;;
+              *) echo "건너뜀: ${svc} (이번 커밋에서 변경 없음, 기존 태그 유지)"; continue ;;
             esac
 
             # 패턴을 <GITHUB_SHA> 리터럴로 잡으면 1회차에 플레이스홀더가 사라져 2회차부터
@@ -125,17 +214,13 @@ jobs:
             grep -q "hailcast-dev-${svc}:${TAG}" "$f" \
               || { echo "::error file=${f}::이미지 태그 치환 실패. 이미지 라인 형식이 바뀌었는지 확인한다."; exit 1; }
 
-            # 검증한 파일을 그 자리에서 스테이징한다. 커밋 스텝에 파일 목록을 또 적으면
-            # 한쪽만 고치고 다른 쪽을 빠뜨려 '치환은 됐는데 커밋만 안 되는' 누락이 난다.
+            # 검증한 파일을 그 자리에서 스테이징한다. 커밋 스텝에 목록을 또 적으면 어긋난다.
             git add "$f"
+            echo "갱신: ${svc} → ${TAG}"
             updated=$((updated + 1))
-            echo "  ${svc} → ${TAG}"
           done
 
-          # 하나도 못 찾았다면 경로 규약이 바뀐 것이다. 조용히 넘어가면 안 된다.
-          [ "$updated" -gt 0 ] \
-            || { echo "::error::갱신 대상 매니페스트를 찾지 못했다. apps/<svc>/deployment.yaml 규약을 확인한다."; exit 1; }
-
+          [ "$updated" -gt 0 ] || echo "갱신할 매니페스트 없음(빌드된 서비스의 매니페스트가 아직 없다)."
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
       # 봇 브랜치+PR 방식은 'PR 이 열려 있는 동안 dev 가 전진하면 뒤처지는' 창이 생긴다.
@@ -170,7 +255,7 @@ jobs:
             -m "워크플로: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
           # 체크아웃과 push 사이에 누가 dev 로 push 하면 non-fast-forward 로 거부된다.
-          # 그때는 rebase 로 따라잡고 다시 시도한다. 우리 변경은 이미지 2줄뿐이라
+          # 그때는 rebase 로 따라잡고 다시 시도한다. 우리 변경은 이미지 라인뿐이라
           # 다른 파일 변경과는 깨끗하게 합쳐진다.
           for attempt in 1 2 3; do
             if git push origin "HEAD:${BASE_BRANCH}"; then
