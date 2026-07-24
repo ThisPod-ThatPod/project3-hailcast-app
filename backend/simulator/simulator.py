@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 os.environ.setdefault("SERVICE_NAME", "simulator")
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request, Response
 
 from common.core.cors import register_cors
 from common.core.exception_handlers import register_exception_handlers
@@ -15,6 +15,7 @@ from common.core.logger import configure_logging, get_logger
 from config import get_settings
 from dependencies import get_simulator_service, get_status_scheduler
 from routers.simulator_router import router as simulator_router
+from services.simulator_service import SimulatorService
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -47,6 +48,20 @@ register_exception_handlers(app)
 #    simulator 를 외부로 여는 규칙(①: 프론트 부하 버튼용)은 별도 매니페스트 작업으로 붙는다.
 #    접두어를 지금 맞춰 두면 그 규칙이 붙는 순간 코드 변경 없이 그대로 동작한다.
 app.include_router(simulator_router, prefix="/api")
+
+
+# [B-1, 2026-07-24] k6(같은 파드의 서브프로세스) 전용 내부 엔드포인트 — 정식 6개 계약과 별개.
+# ⚠️ 일부러 라우터(prefix="/api/simulator") 밖, 앱 루트에 둔다.
+#    ①(simulator 외부 개방)로 매니페스트가 /api/simulator/* 를 열면 그 catch-all 에 _relay 까지
+#    딸려 열린다 — 인증 없이 call-api→SQS 로 부하를 밀어넣는 입구가 외부에 뚫린다. 루트(/_relay)로
+#    빼두면 어떤 /api/simulator/* 규칙에도 안 걸려 '구조적으로' 외부에서 도달할 수 없다(「나」안).
+#    k6 는 같은 파드에서 localhost:8001/_relay 로만 부르므로 ALB 를 안 타 문제없다
+#    (config.py::relay_url · k6/call_load.js::TARGET_URL 이 이 경로와 짝이다).
+@app.post("/_relay", include_in_schema=False)
+async def relay(request: Request, service: SimulatorService = Depends(get_simulator_service)) -> Response:
+    body = await request.body()
+    status_code, content = await service.relay_call(body)
+    return Response(content=content, status_code=status_code, media_type="application/json")
 
 
 # Probe 전용 — 루트 유지. k8s Probe 와 ALB healthcheck-path 가 이 경로를 본다.
