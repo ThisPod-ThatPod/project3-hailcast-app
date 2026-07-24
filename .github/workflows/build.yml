@@ -17,6 +17,7 @@ on:
     # 루트 common/·predict/ 는 레포에 존재하지 않는 잔재라 제거했다(어떤 Dockerfile 도 COPY 하지 않음).
     paths:
       - 'backend/**'
+      - 'frontend/**'      # frontend 는 소스가 backend/ 밖에 있다(frontend/Dockerfile).
       - 'ml/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
@@ -43,7 +44,8 @@ permissions:
 env:
   AWS_REGION: ap-northeast-2
   # 빌드 대상 전체 목록. 새 서비스는 여기 먼저 추가한 뒤 매니페스트를 올린다.
-  ALL_SERVICES: call-api worker predict simulator weather-cron
+  # frontend 는 소스·Dockerfile 위치가 다르다(아래 detect·build 에서 분기).
+  ALL_SERVICES: call-api worker predict simulator weather-cron frontend
 
 jobs:
   # ── 이번 커밋이 실제로 건드린 서비스 판별 ──
@@ -78,18 +80,29 @@ jobs:
             files="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
             echo "변경 파일:"; echo "$files" | sed 's/^/  /'
 
+            # 워크플로가 바뀌면 판별 규칙 자체가 달라질 수 있다 → 안전하게 전부(frontend 포함).
             build_all=false
-            # backend/common 은 5개 서비스가 모두 COPY 한다 → 전부 재빌드해야 한다.
-            echo "$files" | grep -qE '^backend/common/' && build_all=true
-            # 워크플로가 바뀌면 판별 규칙 자체가 달라질 수 있다 → 안전하게 전부.
             echo "$files" | grep -qE '^\.github/workflows/build\.yml$' && build_all=true
 
             if $build_all; then
               changed="$ALL_SERVICES"
             else
               changed=""
+              # backend/common 은 '백엔드' 서비스가 모두 COPY 한다. frontend 는 COPY 하지 않으므로 제외.
+              common_changed=false
+              echo "$files" | grep -qE '^backend/common/' && common_changed=true
+
               for s in $ALL_SERVICES; do
-                echo "$files" | grep -qE "^backend/${s}/" && changed="$changed $s"
+                # frontend 는 소스가 backend/ 밖에 있다(frontend/Dockerfile).
+                case "$s" in
+                  frontend) src="^frontend/" ;;
+                  *)        src="^backend/${s}/" ;;
+                esac
+                if echo "$files" | grep -qE "$src"; then
+                  changed="$changed $s"
+                elif $common_changed && [ "$s" != "frontend" ]; then
+                  changed="$changed $s"
+                fi
               done
               # predict 만 루트 ml/ 을 COPY 한다(Dockerfile: COPY ml /app/ml).
               if echo "$files" | grep -qE '^ml/'; then
@@ -137,9 +150,15 @@ jobs:
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
           IMAGE: hailcast-dev-${{ matrix.service }}
+          SERVICE: ${{ matrix.service }}
         run: |
-          # build context = 레포 루트 (backend/common·ml 공유 모듈 COPY)
-          docker build -f backend/${{ matrix.service }}/Dockerfile \
+          # frontend 만 Dockerfile 이 backend/ 밖에 있다.
+          case "$SERVICE" in
+            frontend) DOCKERFILE="frontend/Dockerfile" ;;
+            *)        DOCKERFILE="backend/${SERVICE}/Dockerfile" ;;
+          esac
+          # build context = 레포 루트 (backend/common·ml·frontend/ 등 COPY 경로가 루트 기준)
+          docker build -f "$DOCKERFILE" \
             -t "$REGISTRY/$IMAGE:${GITHUB_SHA::7}" .
           docker push "$REGISTRY/$IMAGE:${GITHUB_SHA::7}"
 
