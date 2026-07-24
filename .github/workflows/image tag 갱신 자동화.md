@@ -157,7 +157,8 @@ env:
 | 경우 | 해당 서비스 | 필요한 작업 |
 |---|---|---|
 | **A. 이미 빌드 중** | `simulator`, `weather-cron` | 매니페스트만 올리면 **자동 편입** ✅ |
-| **B. 완전 신규** | 위 목록에 없는 모든 것 | **app 레포 작업이 먼저** 필요 ⚠️ |
+| **B. 완전 신규** | 위 목록에 없고 소스가 `backend/` 아래 | **app 레포 작업이 먼저** 필요 ⚠️ |
+| **C. 소스가 `backend/` 밖** | **`frontend`** | **워크플로 수정 4곳** 필요 🔴 |
 
 이미 빌드 중인 서비스는 ECR에 이미지가 계속 올라가고 있어서, 매니페스트만 생기면 봇이 바로 태그를 채웁니다. 반면 신규 서비스는 **ECR에 이미지 자체가 없어서** 매니페스트만 올리면 배포가 실패합니다.
 
@@ -197,8 +198,50 @@ apps/frontend/deployment.yaml 이 먼저 생기면
 - [ ] 디렉터리명 = ECR 리포명의 서비스명이 일치하는가
 - [ ] ArgoCD Application 등록 (`argocd/applications/`)
 
-> 서비스명은 **app 레포 matrix · ECR 리포명 · manifests 디렉터리명** 세 곳에서 모두 같아야 합니다.
+> 서비스명은 **app 레포 `ALL_SERVICES` · ECR 리포명 · manifests 디렉터리명** 세 곳에서 모두 같아야 합니다.
 > 하나라도 다르면 봇이 그 서비스를 못 찾습니다.
+
+### C(소스가 `backend/` 밖) — `frontend` 케이스 🔴
+
+**`ALL_SERVICES`에 이름만 추가하면 안 됩니다.** 워크플로가 두 곳에서 `backend/` 경로를 전제하고 있기 때문입니다.
+
+```
+다른 서비스:  backend/<서비스명>/Dockerfile
+frontend:     frontend/Dockerfile          ← 위치가 다름
+```
+
+```yaml
+detect:  grep -qE "^backend/${s}/"                              # ← 하드코딩
+build:   docker build -f backend/${{ matrix.service }}/Dockerfile   # ← 하드코딩
+```
+
+#### 이름만 추가하면 이렇게 됩니다
+
+```
+평소:   frontend/ 를 고쳐도 detect 가 감지 못함
+        (트리거 paths 에도 frontend/** 가 없어 CI 자체가 안 돎)
+          ↓
+그러다: backend/common 변경 → build_all 발동 → matrix 에 frontend 포함
+          ↓
+        backend/frontend/Dockerfile 없음 → 빌드 실패
+          ↓
+        전체 job 실패 → 모든 서비스 매니페스트 갱신 정지
+```
+
+**평소엔 조용하다가 엉뚱한 시점에 터지는** 형태라 원인 찾기가 어렵습니다.
+
+#### 필요한 수정 4곳
+
+| # | 위치 | 내용 |
+|---|---|---|
+| 1 | 트리거 `paths` | `frontend/**` 추가 |
+| 2 | `detect` 스텝 | `^frontend/` 경로 매핑 추가 |
+| 3 | `build` 스텝 | Dockerfile 경로 분기 (`backend/` vs 루트) |
+| 4 | `ALL_SERVICES` | `frontend` 추가 |
+
+ECR 리포지토리는 이미 준비돼 있습니다 (infra `modules/storage/variables.tf`의 `repositories` 기본값에 `frontend` 포함).
+
+> 이 수정은 **frontend 매니페스트를 만들 때 함께** 하면 됩니다. 그 전까지는 `ALL_SERVICES`에 넣지 마세요 — 넣는 순간 위 실패 경로가 열립니다.
 
 ---
 
@@ -278,32 +321,18 @@ chore(deploy): call-api,predict,worker 이미지 태그 95656a1 로 갱신 [skip
 > `build.yml`이 바뀌면 판별 규칙 자체가 달라지므로 안전하게 5개를 전부 빌드합니다.
 > 따라서 이 변경을 반영하는 첫 실행은 기존과 동일하게 동작하고, **효과는 그다음 커밋부터** 나타납니다.
 
-### 📌 검토 필요 — 트리거 경로의 루트 `common/`·`predict/`
+### 부수 효과 — 롤백 창이 깊어집니다
 
-`build.yml`의 트리거 경로에 루트 `common/`과 `predict/`가 들어 있는데, **확인해보니 어떤 Dockerfile도 이 둘을 COPY하지 않습니다.**
+ECR에는 이미 lifecycle policy가 걸려 있습니다.
 
 ```
-COPY backend/common /app/common     ← backend/common (루트 common/ 아님)
-COPY ml /app/ml                     ← 루트 ml
+태그 없는 이미지 → 14일 후 만료
+레포당 최신 10개만 보관
 ```
 
-즉 이 두 경로를 고쳐도 **이미지 내용은 전혀 바뀌지 않습니다.** 지금은 변경 감지가 2차로 걸러주므로 빌드는 일어나지 않지만, 워크플로 자체는 발동해서 **"돌았는데 아무것도 안 한" 실행 기록만 쌓입니다.**
+예전에는 커밋마다 5개 서비스가 전부 새 이미지를 만들었으므로, 레포당 10개가 곧 **"최근 10커밋"**이었습니다. 자주 커밋하는 시기엔 며칠 전 버전으로도 롤백이 어려웠습니다.
 
-```yaml
-paths:
-  - 'backend/**'
-  - 'common/**'        # ← 이미지에 안 들어감. 제외 검토
-  - 'ml/**'
-  - 'predict/**'       # ← 이미지에 안 들어감. 제외 검토
-  - '.github/workflows/build.yml'
-```
-
-**제외해도 동작에는 영향이 없습니다.** 다만 그 전에 이 디렉터리들의 정체를 확인하는 게 좋겠습니다.
-
-- `backend/` 구조로 옮기면서 남은 **잔재**라면 → 트리거에서 빼고 소스도 정리
-- 다른 용도로 **실제 사용 중**이라면 → 그 코드가 어떤 경로로 배포되는지 별도 확인 필요
-
-어느 쪽이든 지금 트리거에 있어도 이미지에는 영향이 없어, **급한 사안은 아닙니다.**
+지금은 실제로 바뀐 서비스만 이미지를 만드므로, 레포당 10개가 **"그 서비스가 실제로 바뀐 최근 10회"**가 됩니다. 한 달에 두 번 고치는 서비스라면 몇 달 전까지 롤백할 수 있습니다. 위에 적은 롤백 절차가 실질적으로 강화되는 셈입니다.
 
 ### 참고: 왜 PR이 아니라 직접 push인가
 
