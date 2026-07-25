@@ -153,12 +153,23 @@ jobs:
           SERVICE: ${{ matrix.service }}
         run: |
           # frontend 만 Dockerfile 이 backend/ 밖에 있다.
+          # 또한 frontend 는 VITE_* 를 build-arg 로 받아야 한다 — Vite 환경변수는 빌드 시점에
+          # JS 번들에 문자열로 박히므로(런타임 env 아님) 매니페스트 env 로는 못 바꾼다.
+          BUILD_ARGS=()
           case "$SERVICE" in
-            frontend) DOCKERFILE="frontend/Dockerfile" ;;
+            frontend)
+              DOCKERFILE="frontend/Dockerfile"
+              # 운영은 same-origin(CloudFront 가 / 와 /api 를 한 도메인으로 서빙)이라
+              # 백엔드 base URL 을 빈 값으로 구워 프론트가 상대경로(/api/...)로 요청하게 한다.
+              # 빈 값을 안 넘기면 Dockerfile 기본값(localhost)이 박혀 배포본이 localhost 를 부른다.
+              BUILD_ARGS+=(--build-arg VITE_CALL_API_BASE_URL="")
+              BUILD_ARGS+=(--build-arg VITE_SIMULATOR_BASE_URL="")
+              ;;
             *)        DOCKERFILE="backend/${SERVICE}/Dockerfile" ;;
           esac
           # build context = 레포 루트 (backend/common·ml·frontend/ 등 COPY 경로가 루트 기준)
           docker build -f "$DOCKERFILE" \
+            "${BUILD_ARGS[@]}" \
             -t "$REGISTRY/$IMAGE:${GITHUB_SHA::7}" .
           docker push "$REGISTRY/$IMAGE:${GITHUB_SHA::7}"
 
