@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { nycHourLabel } from '../lib/time'
 
 const HOURS_HISTORY = 24 // 슬라이드로 거슬러 볼 수 있는 과거 시간 범위
 const HOURS_FORECAST = 5 // predict가 한 번에 내다보는 미래 시간 (predict/config.py prediction_horizon_hours와 일치)
@@ -34,7 +35,8 @@ type PodPoint = {
 const TIME_SKELETON: PodPoint[] = Array.from({ length: HOURS_HISTORY + HOURS_FORECAST + 1 }, (_, i) => {
   const offset = i - HOURS_HISTORY
   const date = new Date(currentHour.getTime() + offset * 3600_000)
-  return { offset, label: `${date.getHours()}시`, timestamp: date.toISOString() }
+  // [B-7, 2026-07-25] 브라우저 로컬시간(getHours()) 대신 뉴욕 현지시간 — 모델이 그 기준으로 예측한다.
+  return { offset, label: nycHourLabel(date), timestamp: date.toISOString() }
 })
 
 const WINDOW_START_MIN = -HOURS_HISTORY

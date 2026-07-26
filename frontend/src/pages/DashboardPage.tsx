@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import PodForecastChart from '../components/PodForecastChart'
 import TrafficHistoryChart from '../components/TrafficHistoryChart'
 import RdsTableViewer from '../components/RdsTableViewer'
+import WeatherStrip from '../components/WeatherStrip'
 
 // 백엔드 연동 지점 — predict/simulator/call-api가 서로 다른 서비스(포트)라 base URL을 따로 둔다.
 // 앞에 통합 게이트웨이가 생기기 전까지의 임시 구성.
@@ -129,11 +130,16 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="flex-1">
-          <div className="mb-2 text-center text-sm text-gray-500">파드수 그래프</div>
+          <div className="mb-2 text-center text-sm text-gray-500">파드수 그래프 (뉴욕 현지시간 기준)</div>
           <div className="h-72 rounded-lg border border-gray-200 bg-white p-2">
             <PodForecastChart />
           </div>
         </div>
+      </div>
+
+      <div>
+        <div className="mb-2 text-center text-sm text-gray-500">시간대별 날씨 (뉴욕 현지시간 기준)</div>
+        <WeatherStrip />
       </div>
 
       <div className="h-96">
