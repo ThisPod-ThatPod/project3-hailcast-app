@@ -13,12 +13,20 @@ class SimulatorSettings(BaseAppSettings):
     # --- Traffic 제어 (k6 서브프로세스, simulator/k6/call_load.js) ---
     # 2026-07-22: 버튼을 누른 만큼 200→400→600으로 누적되게 max_tps를 traffic_step의
     # 3배로 늘림(원래 D1은 step==max로 on/off 토글이었는데, 여러 단계로 올려보는 테스트가
-    # 필요해져서 변경). call-api의 replica/CPU·커넥션 풀(D3, common/aws/client_factory.py,
-    # call-api/config.py::aws_max_pool_connections)도 이 상한에 맞춰 같이 올려뒀다 —
-    # 여기 값만 혼자 올리면 call-api가 못 버티고 죽는다(2026-07-22 실제 crash 확인함).
+    # 필요해져서 변경). 그 시점엔 k6가 call-api를 직결해서 simulator 자신은 CPU를 거의
+    # 안 썼고, call-api 쪽(replica/CPU·커넥션 풀)만 이 상한에 맞춰 검증했었다.
+    #
+    # 2026-07-27 (600→300 하향): B-1(k6→simulator relay)로 바뀌면서 simulator 자신도
+    # relay 요청마다 httpx 클라이언트 오버헤드(실측 ~5.83ms/건)를 쓰게 됨 — 600 TPS면
+    # 초당 3.5코어어치가 필요한데 파드 CPU limit은 2코어라 이벤트루프가 밀려서 liveness
+    # probe가 간헐적으로 실패 → 파드 재시작 → 메모리 상태(트래픽 설정) 초기화되는 것 실측
+    # 확인함(트래픽이 감소 버튼 없이 저절로 죽는 것처럼 보이던 원인). 300 TPS(≈1.75코어
+    # 필요) + k8s CPU limit 2→3코어로 여유(58% 사용)를 만드는 조합으로 완화.
+    # (docs/2026-07-27-findings.md 참고 — call-api/worker 쪽 실제 처리 능력 문제가
+    # 아니라 simulator의 relay 오버헤드 문제라 call-api 쪽 설정은 그대로 둔다.)
     traffic_step: float = 200.0      # increase/decrease 1회당 TPS 증감폭
     min_tps: float = 0.0             # 하한 (0 이하로 내려가지 않음, 0이면 k6 정지)
-    max_tps: float = 600.0           # 상한 (call-api 증설 용량에 맞춤)
+    max_tps: float = 300.0           # 상한 (simulator relay의 CPU 예산에 맞춤)
     k6_binary: str = "k6"            # PATH에 있는 k6 실행 파일명/경로
 
     # --- B-1 (2026-07-24): k6가 call-api를 직접 안 때리고 simulator를 거쳐가게 변경 ---
