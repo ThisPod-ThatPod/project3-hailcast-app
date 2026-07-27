@@ -2,7 +2,7 @@
 # Prediction Reader → G1(예측 기준선) → G2(실측 트래픽 반응형 조정+히스테리시스) →
 # Cooldown → KEDA Patch [Retry] → RDS 이력(ScalingEvent, 2026-07-20 S3→RDS 컷오버)
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from common.core.exceptions import ScalingError
 from common.core.logger import get_logger
@@ -16,6 +16,7 @@ from common.core.metrics import (
 )
 from common.core.store import FileStore
 from common.db.database import Database
+from common.models.prediction import PredictionDocument
 from common.models.scaling import ScalingSignals
 
 from adapters.keda_adapter import KedaAdapter
@@ -85,17 +86,35 @@ class ScalerService:
         result: dict = {"current_replicas": self._keda.get_min_replicas()}
         document = self._reader.read_latest()
         if document is not None:
-            decision = self._engine.decide(
-                # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-                ScalingSignals(predicted_demand=document.predicted_taxi_demand)
-            )
+            demand = self._current_demand(document)
+            decision = self._engine.decide(ScalingSignals(predicted_demand=demand))
             result.update(
-                # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-                predicted_demand=document.predicted_taxi_demand,
+                predicted_demand=demand,
                 desired_replicas=decision.desired_replicas,
                 generated_at=document.generated_at,
             )
         return result
+
+    def _current_demand(self, document: PredictionDocument) -> float:
+        """[2026-07-27] "지금 이 시간"에 해당하는 target_time을 매칭해서 수요를 고른다.
+
+        예전엔 document.predicted_taxi_demand(그 문서의 '첫 번째' 시간창 값, 생성
+        시점 기준)를 그대로 썼다 — 예측이 4시간 주기로만 갱신되므로, 갱신 직후가
+        아니면 "첫 번째" 항목이 지금 시간과 다른 경우가 대부분이었다.
+        pod_forecast_service.py의 대시보드 그래프는 이미 target_time 매칭으로
+        고쳤는데(B-3, 2026-07-24) 여기(실제 minReplicaCount를 정하는 스케일링
+        결정)는 그대로 남아있어서, 대시보드가 보여주는 "예측파드수"와 실제
+        replica 수가 어긋나는 원인이었다 — 둘을 동일한 로직으로 통일한다.
+        """
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        totals = {item.target_time: item.predicted_demand for item in document.predictions}
+        if not totals:
+            return document.predicted_taxi_demand
+        closest = min(totals, key=lambda t: abs(t - now))
+        tolerance = timedelta(minutes=self._settings.prediction_window_minutes)
+        if abs(closest - now) > tolerance:
+            return document.predicted_taxi_demand
+        return totals[closest]
 
     # ---------- G2: 실측 트래픽 반응형 조정 ----------
     def _read_actual_traffic(self) -> float | None:
@@ -162,8 +181,7 @@ class ScalerService:
             )
             return
 
-        # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 1. 예측 지표 이름 불일치
-        demand = document.predicted_taxi_demand
+        demand = self._current_demand(document)
         self.last_predicted_demand = demand
 
         baseline_decision = self._engine.decide(ScalingSignals(predicted_demand=demand))
