@@ -38,12 +38,12 @@ spec:
             # call-api를 직결해서 이 파드 자신은 거의 안 썼던 메모리를, relay 경유로 바뀌면서
             # FastAPI+httpx 커넥션풀 몫까지 같은 컨테이너 메모리에 더해 쓰게 됐다.
             #
-            # 2026-07-27 (cpu 2000m→3000m, max_tps 600→300과 세트): relay 요청 1건당
-            # httpx 클라이언트 자체 오버헤드가 실측 ~5.83ms — 300 TPS 기준 초당 ~1.75코어
-            # 필요. 2코어(2000m) 한도에선 87.5% 사용이라 GC/k6 자체 몫까지 감안하면 여전히
-            # 빠듯해서, 3코어로 올려 58% 사용까지 여유를 만든다(docs/2026-07-27-findings.md).
+            # 2026-07-27: max_tps를 600→300으로 낮춤(relay 요청당 httpx 오버헤드 실측
+            # ~5.83ms — 300 TPS면 초당 ~1.75코어 필요, 2코어(2000m) 한도에선 87.5% 사용이라
+            # 여전히 빠듯함). CPU를 3코어로 같이 올리는 안도 검토했으나 이번엔 보류하고
+            # TPS만 우선 낮춤 — CPU 증설은 필요성 재확인 후 별도로 진행(docs/2026-07-27-findings.md).
             requests: { cpu: 300m, memory: 512Mi }
-            limits: { cpu: 3000m, memory: 1280Mi }
+            limits: { cpu: 2000m, memory: 1280Mi }
 ---
 apiVersion: v1
 kind: Service
