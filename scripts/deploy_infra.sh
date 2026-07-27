@@ -147,12 +147,12 @@ if ! kubectl get secret hailcast-rds-secret -n "$NAMESPACE" &>/dev/null; then
 fi
 
 kubectl apply -f "$RENDER_DIR/predict-rbac.yaml"
-# predict-deployment.yaml은 2026-07-22부터, call-api-deployment.yaml은 2026-07-23부터
-# 배포팀 ArgoCD(apps/predict, apps/call-api)가 소유 — 여기서 안 올림(중복 실행/되돌림 방지).
-kubectl apply -f "$RENDER_DIR/worker-deployment.yaml"
-kubectl apply -f "$RENDER_DIR/weather-cron-deployment.yaml"
-kubectl apply -f "$RENDER_DIR/simulator-deployment.yaml"
-kubectl apply -f "$RENDER_DIR/frontend-deployment.yaml"
+# predict/call-api(더 이전) + worker/simulator/frontend/weather-cron(2026-07-27 확인)까지
+# 전부 배포팀 ArgoCD(apps/*)가 소유 — 여기서 안 올림(중복 실행/되돌림 방지).
+# 2026-07-27: kubectl get application -n argocd로 6개 서비스 전부 Synced인 것 확인 후
+# 같은 이름(hailcast-worker/hailcast-simulator/hailcast-frontend/hailcast-weather-cron)의
+# 리소스를 이 스크립트가 계속 apply하고 있던 것 뒤늦게 발견 — predict/call-api 때와
+# 동일한 되돌림 위험이라 전부 제거. 남는 건 predict-rbac(ClusterRole)·KEDA 리소스뿐이다.
 kubectl apply -f "$RENDER_DIR/keda-triggerauthentication.yaml" \
     || warning "TriggerAuthentication apply 실패 — KEDA operator가 아직 설치 안 됐을 수 있음(배포팀 확인)."
 kubectl apply -f "$RENDER_DIR/worker-scaledobject.yaml" \

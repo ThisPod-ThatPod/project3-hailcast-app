@@ -33,13 +33,17 @@ spec:
           resources:
             # [B-1, 2026-07-24] k6가 call-api를 직결하던 걸 relay 경유로 바꾸면서 simulator
             # 자신도 트래픽만큼 CPU를 쓰게 됨(전엔 거의 0) — call-api 증설 때와 같은 이유로 상향.
-            # 200m/1000m로도 600rps 피크에서 재시작 발생 실측 → 한 단계 더 올림.
             # memory: 512Mi에서 최대부하(600rps) 램프 직후 OOMKilled(exitCode 137) 실측함 —
-            # k6 자체가 call_load.js의 maxVUs=rps*5(=3000 at 600rps)만큼 VU를 미리 할당하는데,
-            # 전엔 k6가 call-api를 직결해서 이 파드 자신은 거의 안 썼던 메모리를, relay 경유로
-            # 바뀌면서 FastAPI+httpx 커넥션풀 몫까지 같은 컨테이너 메모리에 더해 쓰게 됐다.
+            # k6 자체가 call_load.js의 maxVUs=rps*5만큼 VU를 미리 할당하는데, 전엔 k6가
+            # call-api를 직결해서 이 파드 자신은 거의 안 썼던 메모리를, relay 경유로 바뀌면서
+            # FastAPI+httpx 커넥션풀 몫까지 같은 컨테이너 메모리에 더해 쓰게 됐다.
+            #
+            # 2026-07-27 (cpu 2000m→3000m, max_tps 600→300과 세트): relay 요청 1건당
+            # httpx 클라이언트 자체 오버헤드가 실측 ~5.83ms — 300 TPS 기준 초당 ~1.75코어
+            # 필요. 2코어(2000m) 한도에선 87.5% 사용이라 GC/k6 자체 몫까지 감안하면 여전히
+            # 빠듯해서, 3코어로 올려 58% 사용까지 여유를 만든다(docs/2026-07-27-findings.md).
             requests: { cpu: 300m, memory: 512Mi }
-            limits: { cpu: 2000m, memory: 1280Mi }
+            limits: { cpu: 3000m, memory: 1280Mi }
 ---
 apiVersion: v1
 kind: Service
