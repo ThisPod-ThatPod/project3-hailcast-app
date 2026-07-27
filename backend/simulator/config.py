@@ -28,7 +28,9 @@ class SimulatorSettings(BaseAppSettings):
     # (6~8코어급 인스턴스 필요, 4코어로는 여전히 빠듯함)을 배포팀과 별도로 진행하기로 함.
     # (docs/2026-07-27-findings.md 참고 — call-api/worker 쪽 실제 처리 능력 문제가
     # 아니라 simulator의 relay 오버헤드 문제라 call-api 쪽 설정은 그대로 둔다.)
-    traffic_step: float = 200.0      # increase/decrease 1회당 TPS 증감폭
+    # 2026-07-27: 통합 점검 중 클릭 한두 번으로 빠르게 부하를 키워 스케일업을 보고 싶다는
+    # 요청으로 200→500 상향(600 상한 기준: 1클릭=500, 2클릭=600에서 캡).
+    traffic_step: float = 500.0      # increase/decrease 1회당 TPS 증감폭
     min_tps: float = 0.0             # 하한 (0 이하로 내려가지 않음, 0이면 k6 정지)
     max_tps: float = 600.0           # 상한 (반응형 스케일링 시연에 필요 — CPU/NodePool 증설 필요, 별도 진행)
     k6_binary: str = "k6"            # PATH에 있는 k6 실행 파일명/경로
