@@ -1,3 +1,4 @@
+# test
 # Weather Collector 설정 — NYC 단일 지점 예보 수집. API URL·주기·재시도 전부 환경변수.
 from functools import lru_cache
 
