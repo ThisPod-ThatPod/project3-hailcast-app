@@ -25,7 +25,11 @@ class DashboardService:
 
     def stats(self) -> DashboardStats:
         try:
-            pods = self._keda.get_min_replicas()
+            # [2026-07-28] get_min_replicas()는 ScaledObject에 설정된 목표치(baseline)일 뿐
+            # 실제 파드 수가 아니다 — 반응형(KEDA)으로 그 위로 올라가 있어도 이 값은 안 바뀐다.
+            # 파드수 그래프의 "실제파드수"(get_actual_replicas())와 라벨은 같은데 서로 다른
+            # 값을 보여주고 있던 것 실측 확인(대시보드 상단 3 vs 그래프 5) — 실제 값으로 통일.
+            pods = self._keda.get_actual_replicas()
         except Exception as exc:
             logger.warning(f"keda unreachable: {exc}", extra={"event": "dashboard_partial"})
             pods = None
