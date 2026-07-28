@@ -111,7 +111,7 @@ export default function DashboardPage() {
           onClick={burstTraffic}
           className="flex-1 rounded-md bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
         >
-          부하 폭주 주입
+          부하 주입
         </button>
         <button
           type="button"
