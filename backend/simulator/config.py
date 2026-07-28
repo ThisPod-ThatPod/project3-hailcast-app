@@ -45,6 +45,19 @@ class SimulatorSettings(BaseAppSettings):
     relay_url: str = "http://localhost:8001/_relay"
     relay_timeout_seconds: float = 5.0
 
+    # --- Burst (2026-07-28) ---
+    # "SQS 메시지 유입" 버튼(콜 1건만 보냄, 사실상 안 쓰임)을 대체 — 예측형 baseline이
+    # 이미 높을 때는 지속형 TPS(상한 600)로는 큐가 안 쌓여서 반응형(KEDA)을 못 보여준다는
+    # 걸 실측 확인함(docs/2026-07-28-todo.md). 지속형 대신 순간적으로 N건을 몰아 쏴서
+    # 큐를 즉시 채우는 방식으로 반응형 스케일링을 확실히 트리거한다.
+    # ⚠️ burst도 relay_call() 경로를 그대로 써서 요청당 httpx 오버헤드(~5.83ms)가 그대로
+    # 든다 — "순간적이라 CPU 부담이 적다"는 착각 주의, 총 CPU 비용은 지속형과 동일하고
+    # 오히려 짧은 시간에 몰려서 더 세게 튄다. 그래서 처음엔 작게(2000~3000) 시작해서
+    # 실측하고 필요하면 올리는 것을 권장 — 기본값도 보수적으로 잡는다.
+    burst_default_count: int = 2000       # 버튼 기본 요청 수
+    burst_max_count: int = 10000          # API로 허용하는 절대 상한(안전장치)
+    burst_concurrency: int = 100          # 동시 발사 수 — relay_client 풀(200)보다 낮게 잡아 여유를 둠
+
     # --- Status (A2) ---
     status_write_interval_seconds: float = 2.0   # FileStore(simulator/status.json) 갱신 주기
 

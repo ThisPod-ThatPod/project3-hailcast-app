@@ -107,6 +107,38 @@ class SimulatorService:
     def status(self) -> SimulatorStatus:
         return self._state.snapshot()
 
+    _BURST_PAYLOAD = (
+        b'{"user_id":"burst","pickup":"burst-pickup",'
+        b'"destination":"burst-destination","source":"simulator"}'
+    )
+
+    async def burst(self, count: int) -> int:
+        """[2026-07-28] N건을 rate 제한 없이 최대한 빠르게(동시성만 제한) call-api로
+        쏴서 SQS 큐를 순간적으로 채운다 — 반응형(KEDA) 스케일링 시연용.
+
+        지속형 TPS(increase/decrease, k6)와 별개 경로다. k6/현재 tps 상태는 안 건드리고,
+        relay_call()과 동일하게 record_generated/success/fail로 카운트만 같이 늘어난다.
+        백그라운드로 던지고 바로 반환 — 수천 건을 동시성 제한 걸고 보내면 수 초~수십 초
+        걸릴 수 있어서, 호출부(HTTP 요청)를 그만큼 붙잡아두지 않기 위함이다. 진행 상황은
+        기존 /simulator/status의 generated_requests 증가로 확인한다.
+        """
+        count = max(0, min(count, self._settings.burst_max_count))
+        if count == 0:
+            return 0
+        asyncio.create_task(self._run_burst(count))
+        logger.info(f"burst queued (count={count})", extra={"event": "burst_queued", "count": count})
+        return count
+
+    async def _run_burst(self, count: int) -> None:
+        sem = asyncio.Semaphore(self._settings.burst_concurrency)
+
+        async def one() -> None:
+            async with sem:
+                await self.relay_call(self._BURST_PAYLOAD)
+
+        await asyncio.gather(*(one() for _ in range(count)))
+        logger.info(f"burst finished (count={count})", extra={"event": "burst_finished", "count": count})
+
     async def relay_call(self, body: bytes) -> tuple[int, bytes]:
         """[B-1, 2026-07-24] k6가 보낸 요청을 이 자리에서 실제 call-api로 전달하고,
         성공/실패를 그 자리에서 카운트한다(traffic_state.py record_success/record_fail).

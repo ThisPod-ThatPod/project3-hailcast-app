@@ -12,7 +12,6 @@ import WeatherStrip from '../components/WeatherStrip'
 // 운영(base='' → 같은 도메인 /api/dashboard/... → ALB가 predict로)이 같은 코드로 돈다.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const SIMULATOR_BASE = import.meta.env.VITE_SIMULATOR_BASE_URL ?? 'http://localhost:8001'
-const CALL_API_BASE = import.meta.env.VITE_CALL_API_BASE_URL ?? 'http://localhost:8000'
 
 // backend/common/models/dashboard.py::DashboardStats와 동일 모양.
 // 노드 수는 백엔드에 데이터 소스가 없어(C8, 보류) 항상 null로 온다.
@@ -66,19 +65,20 @@ export default function DashboardPage() {
     fetch(`${SIMULATOR_BASE}/api/simulator/increase`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
   const decreaseTraffic = () =>
     fetch(`${SIMULATOR_BASE}/api/simulator/decrease`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
-  // "SQS 메시지 유입" — simulator의 지속 TPS 제어와 별개로, call-api에 콜 1건을 바로 보내
-  // SQS에 1회성으로 메시지를 넣어보는 버튼 (대응하는 simulator 전용 엔드포인트는 없음).
-  const injectSqs = () =>
-    fetch(`${CALL_API_BASE}/api/call`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: 'dashboard-manual-inject',
-        pickup: '강남역',
-        destination: '홍대입구역',
-        source: 'api',
-      }),
-    }).then(refreshTraffic).catch(() => {})
+  // [2026-07-28] "SQS 메시지 유입"(콜 1건, 사실상 안 쓰임) 대체 — 지속형 TPS(증가 버튼,
+  // 상한 600)로는 예측형 baseline이 이미 높을 때 큐가 안 쌓여서 반응형(KEDA) 스케일업을
+  // 못 보여주는 것 실측 확인함(docs/2026-07-28-todo.md). N건을 순간적으로 몰아 쏴서
+  // 큐를 즉시 채우는 버튼 — simulator가 백그라운드로 처리하고 바로 응답하므로, 진행되는
+  // 동안 트래픽 그래프가 몇 초 더 자연스럽게 올라가는 걸 보려고 재조회를 한 번 더 늦게 건다.
+  const burstTraffic = () => {
+    fetch(`${SIMULATOR_BASE}/api/simulator/burst`, { method: 'POST' })
+      .then(refreshTraffic)
+      .catch(() => {})
+    setTimeout(() => {
+      loadStats()
+      setTrafficRefreshSignal((n) => n + 1)
+    }, 10000)
+  }
   const reset = () => fetch(`${SIMULATOR_BASE}/api/simulator/reset`, { method: 'POST' }).then(refreshTraffic).catch(() => {})
 
   return (
@@ -108,10 +108,10 @@ export default function DashboardPage() {
         </button>
         <button
           type="button"
-          onClick={injectSqs}
+          onClick={burstTraffic}
           className="flex-1 rounded-md bg-gray-800 px-4 py-2 text-sm font-medium text-white hover:bg-gray-900"
         >
-          SQS 메시지 유입
+          대량 부하 주입
         </button>
         <button
           type="button"
