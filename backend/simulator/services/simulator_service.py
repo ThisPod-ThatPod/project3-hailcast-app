@@ -36,7 +36,7 @@ class SimulatorService:
             tps = self._state.current_tps
             if tps <= 0:
                 tps = await self._state.adjust_tps(self._settings.traffic_step)
-            await self._start_k6(tps)
+            await self._start_k6(tps, current_tps=0.0)
             return self._state.snapshot()
 
     async def stop(self) -> SimulatorStatus:
@@ -44,8 +44,8 @@ class SimulatorService:
             await self._stop_k6()
             return self._state.snapshot()
 
-    async def _start_k6(self, tps: float) -> None:
-        await asyncio.to_thread(self._runner.start, tps)
+    async def _start_k6(self, tps: float, current_tps: float = 0.0) -> None:
+        await asyncio.to_thread(self._runner.start, tps, current_tps)
         task_id = await self._state.mark_started()
         logger.info(
             "traffic started",
@@ -68,7 +68,7 @@ class SimulatorService:
             # 재시작해야 한다 — stop()이 current_tps를 리셋 안 하기 때문에, 예전엔 상한에서
             # stop 후 increase를 눌러도 tps==before라 아무 반응이 없었다(진짜 버그).
             if tps != before or not was_running:
-                await self._apply_rate(tps)
+                await self._apply_rate(tps, before if was_running else 0.0)
             return self._state.snapshot()
 
     async def decrease(self) -> SimulatorStatus:
@@ -77,19 +77,23 @@ class SimulatorService:
             before = self._state.current_tps
             tps = await self._state.adjust_tps(-self._settings.traffic_step)
             if tps != before or not was_running:  # 이유는 increase()와 동일 (B-2)
-                await self._apply_rate(tps)
+                await self._apply_rate(tps, before if was_running else 0.0)
             return self._state.snapshot()
 
-    async def _apply_rate(self, tps: float) -> None:
-        """목표 TPS 변경을 k6에 반영한다. 0 이하가 되면 프로세스를 정지한다."""
+    async def _apply_rate(self, tps: float, current_tps: float = 0.0) -> None:
+        """목표 TPS 변경을 k6에 반영한다. 0 이하가 되면 프로세스를 정지한다.
+
+        current_tps: 재시작 직전(변경 전) rate — k6가 여기서부터 target(tps)까지 부드럽게
+        램프하도록 K6Runner에 그대로 전달한다(2026-07-28, 계단식 그래프 문제 완화).
+        """
         if tps <= 0:
             await self._stop_k6()
             return
         if not self._state.running:
-            await self._start_k6(tps)
+            await self._start_k6(tps, current_tps)
             return
         # 이미 떠 있던 경우 — 새 rate로 재시작만 하고 시작 시각(task_id 등)은 유지한다.
-        await asyncio.to_thread(self._runner.start, tps)
+        await asyncio.to_thread(self._runner.start, tps, current_tps)
         logger.info(f"tps changed to {tps}", extra={"event": "tps_changed", "detail": {"tps": tps}})
 
     async def reset(self) -> SimulatorStatus:
