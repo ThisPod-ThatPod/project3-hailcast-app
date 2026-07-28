@@ -52,10 +52,13 @@ class SimulatorSettings(BaseAppSettings):
     # 큐를 즉시 채우는 방식으로 반응형 스케일링을 확실히 트리거한다.
     # ⚠️ burst도 relay_call() 경로를 그대로 써서 요청당 httpx 오버헤드(~5.83ms)가 그대로
     # 든다 — "순간적이라 CPU 부담이 적다"는 착각 주의, 총 CPU 비용은 지속형과 동일하고
-    # 오히려 짧은 시간에 몰려서 더 세게 튄다. 그래서 처음엔 작게(2000~3000) 시작해서
-    # 실측하고 필요하면 올리는 것을 권장 — 기본값도 보수적으로 잡는다.
-    burst_default_count: int = 2000       # 버튼 기본 요청 수
-    burst_max_count: int = 10000          # API로 허용하는 절대 상한(안전장치)
+    # 오히려 짧은 시간에 몰려서 더 세게 튄다.
+    # 실측(2026-07-28): 2000건 → worker(baseline 3)가 그새 다 처리해서 큐가 0으로 빠짐,
+    # 반응형 안 뜸. 5000건 → 큐 최대 1223까지 쌓였지만(baseline 3 기준 필요치 1500에
+    # 근소하게 못 미침) 여전히 부족, 이때도 simulator는 재시작 없이 안정적이었음(CPU는
+    # 여유 있음, worker가 너무 빨라서 못 넘긴 것). 10000으로 상향.
+    burst_default_count: int = 10000      # 버튼 기본 요청 수
+    burst_max_count: int = 15000          # API로 허용하는 절대 상한(안전장치)
     burst_concurrency: int = 100          # 동시 발사 수 — relay_client 풀(200)보다 낮게 잡아 여유를 둠
 
     # --- Status (A2) ---
