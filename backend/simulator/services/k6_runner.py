@@ -26,14 +26,24 @@ class K6Runner:
     def is_alive(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
-    def start(self, target_rps: float) -> None:
+    def start(self, target_rps: float, current_rps: float = 0.0) -> None:
         """target_rps로 k6를 (재)시작한다. 이미 떠 있으면 먼저 종료 후 새로 띄운다.
+
+        [2026-07-28] current_rps(재시작 직전 rate)를 CURRENT_RPS로 같이 넘긴다 —
+        call_load.js가 ramping-arrival-rate로 current_rps→target_rps를 몇 초에 걸쳐
+        부드럽게 램프하기 위함(예전엔 constant-arrival-rate라 재시작마다 target으로
+        즉시 점프해서, 클릭할 때마다 그래프가 계단식으로 튀는 원인이었다).
 
         실패 시 호출부가 원인을 알 수 있도록 AppError로 감싼다 — 여기서 실패하면 self._process는
         None으로 남아 running=false와 실제 상태가 일치한다 (target tps만 앞서 갱신돼 있을 수 있음).
         """
         self.stop()
-        env = {**os.environ, "TARGET_URL": self._target_url, "TARGET_RPS": f"{target_rps:g}"}
+        env = {
+            **os.environ,
+            "TARGET_URL": self._target_url,
+            "TARGET_RPS": f"{target_rps:g}",
+            "CURRENT_RPS": f"{current_rps:g}",
+        }
         try:
             self._process = subprocess.Popen(
                 [self._binary, "run", str(_SCRIPT_PATH)],
