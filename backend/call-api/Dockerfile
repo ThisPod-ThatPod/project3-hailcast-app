@@ -1,3 +1,4 @@
+# GitOps 테스트를 위한 주석입니다. 테스트 이후 삭제 예정입니다.
 # call-api Dockerfile (멀티스테이지·비루트)
 # build context = 레포 루트 (common/ 공유 패키지 COPY 필요):
 #   docker build -f backend/call-api/Dockerfile -t hailcast/call-api .

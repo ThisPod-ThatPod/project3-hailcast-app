@@ -1,3 +1,4 @@
+# GitOps 테스트를 위한 주석입니다. 테스트 이후 삭제 예정입니다.
 # frontend Dockerfile (멀티스테이지) — 정적 빌드 산출물을 nginx로 서빙
 # build context = 레포 루트:
 #   docker build -f frontend/Dockerfile -t hailcast/frontend .
