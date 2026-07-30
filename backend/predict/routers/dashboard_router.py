@@ -31,7 +31,7 @@ def traffic_history(
 @router.get("/pod-forecast", response_model=list[PodForecastPoint])
 def pod_forecast(
     hours_history: int = Query(default=24, ge=0, le=168),
-    hours_forecast: int = Query(default=5, ge=0, le=24),
+    hours_forecast: int = Query(default=4, ge=0, le=24),
     service: PodForecastService = Depends(get_pod_forecast_service),
 ) -> list[PodForecastPoint]:
     return service.pod_forecast(hours_history, hours_forecast)
