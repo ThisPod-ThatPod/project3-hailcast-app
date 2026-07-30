@@ -13,8 +13,8 @@ import {
 import { nycHourLabel } from '../lib/time'
 
 const HOURS_HISTORY = 24 // 슬라이드로 거슬러 볼 수 있는 과거 시간 범위
-const HOURS_FORECAST = 5 // predict가 한 번에 내다보는 미래 시간 (predict/config.py prediction_horizon_hours와 일치)
-const WINDOW_SIZE = 11 // 그래프에 한 번에 보이는 시간 폭 (기본값: 현재 기준 ±5시간)
+const HOURS_FORECAST = 4 // predict가 한 번에 내다보는 미래 시간 (predict/config.py prediction_horizon_hours와 일치)
+const WINDOW_SIZE = 11 // 그래프에 한 번에 보이는 시간 폭 (기본값 시작 위치는 HOURS_FORECAST 기준 자동 계산)
 
 // 백엔드 연동 지점 — predict는 00:03부터 4시간마다 예측을 갱신한다 — 과거/현재/미래 경계는 "정시" 하나뿐.
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''

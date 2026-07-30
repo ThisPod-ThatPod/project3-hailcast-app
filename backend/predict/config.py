@@ -15,7 +15,10 @@ class PredictSettings(BaseAppSettings):
 
     # --- Prediction ---
     prediction_window_minutes: int = 60      # 예측 시간창 크기 (1시간 버킷)
-    prediction_horizon_hours: int = 5        # 한 번 실행할 때 몇 시간 앞까지 예측할지 (07-15 회의 확정: 4시간 주기 + 5시간 커버)
+    # [2026-07-30] 5(4시간 주기 + 1시간 버퍼, 07-15 회의 확정)에서 4로 축소 — 대시보드
+    # 그래프 마지막 칸이 예측 없이 비거나 이전 시간창 값을 빌려 쓰던 현상 정리 목적.
+    # 다음 예측 주기까지의 여유 버퍼가 없어진다는 트레이드오프 인지하고 변경.
+    prediction_horizon_hours: int = 4        # 한 번 실행할 때 몇 시간 앞까지 예측할지
 
     # --- Model (S3) ---
     model_s3_prefix: str = "models"       # models/latest/{model.pkl, metadata.json}

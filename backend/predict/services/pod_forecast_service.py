@@ -58,7 +58,10 @@ class PodForecastService:
             return None
         closest = min(totals, key=lambda t: abs(t - bucket))
         tolerance = timedelta(minutes=self._settings.prediction_window_minutes)
-        if abs(closest - bucket) > tolerance:
+        # [2026-07-30] 경계값(정확히 tolerance만큼 차이)도 탈락시킨다 — horizon 마지막 시간창
+        # 값을 그다음 시간 칸까지 "빌려와" 채우는 현상(대시보드 그래프 +5h 칸에 +4h 값 재사용)
+        # 방지. 일반적인 정시 매칭(차이=0)에는 영향 없다.
+        if abs(closest - bucket) >= tolerance:
             return None
         return totals[closest]
 
