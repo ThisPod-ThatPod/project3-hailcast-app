@@ -1,0 +1,55 @@
+# 예시: predict가 ScaledObject를 Read/Patch하기 위한 최소 RBAC
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hailcast-scaledobject-patcher
+  # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
+  namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
+rules:
+  - apiGroups: ["keda.sh"]
+    resources: ["scaledobjects"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]   # worker Deployment의 실제 파드 수(status.readyReplicas) 조회용
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hailcast-predict-scaledobject
+  # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
+  namespace: hailcast   # 네이밍규약서 §8 — 앱 워크로드 네임스페이스
+subjects:
+  - kind: ServiceAccount
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 3. ServiceAccount 이름 어긋남
+    name: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
+    # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
+    namespace: hailcast
+roleRef:
+  kind: Role
+  name: hailcast-scaledobject-patcher
+  apiGroup: rbac.authorization.k8s.io
+---
+# 대시보드 노드 수 조회(C2)용 — Node는 cluster-scoped 리소스라 Role이 아닌 ClusterRole 필요.
+# 로컬 k8s·EKS 공통 (K8s RBAC만 필요, AWS IAM/IRSA 추가 권한 불필요).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hailcast-node-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hailcast-predict-node-reader
+subjects:
+  - kind: ServiceAccount
+    name: predict-sa   # 네이밍규약서 §5-3 IRSA 표: hailcast:predict-sa
+    namespace: hailcast
+roleRef:
+  kind: ClusterRole
+  name: hailcast-node-reader
+  apiGroup: rbac.authorization.k8s.io

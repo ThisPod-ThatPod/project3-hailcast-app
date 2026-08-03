@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+boto3
+SQLAlchemy
+psycopg2-binary
+lightgbm
+scikit-learn
+joblib
+pandas
+kubernetes
+httpx

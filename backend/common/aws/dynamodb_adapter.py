@@ -1,0 +1,30 @@
+# DynamoDB Adapter — Service는 boto3를 직접 호출하지 않고 이 Adapter만 사용한다.
+# 오답노트(hailcast-dev-prediction-log, 인프라 리소스 #41) 전용 — put_item 하나만 필요.
+from botocore.exceptions import BotoCoreError, ClientError
+
+from common.aws.client_factory import AwsClientFactory
+from common.core.exceptions import AwsError
+from common.core.logger import get_logger
+
+logger = get_logger("dynamodb")
+
+
+class DynamoDbAdapter:
+    def __init__(self, factory: AwsClientFactory, table_name: str):
+        self._client = factory.get_client("dynamodb")
+        self._table_name = table_name
+
+    def _wrap(self, operation: str, exc: Exception) -> AwsError:
+        return AwsError(
+            f"DynamoDB {operation} failed: {exc}",
+            service="dynamodb",
+            operation=operation,
+            detail={"table": self._table_name},
+        )
+
+    def put_item(self, item: dict) -> None:
+        """item은 이미 DynamoDB AttributeValue 형식({"S": ...} 등)으로 변환된 dict."""
+        try:
+            self._client.put_item(TableName=self._table_name, Item=item)
+        except (ClientError, BotoCoreError) as exc:
+            raise self._wrap("put_item", exc) from exc

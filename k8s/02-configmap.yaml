@@ -1,0 +1,28 @@
+# 전 서비스 공용 ConfigMap — 네이밍규약서 §8-2 그대로. 값이 필요 없는 서비스는 그냥 무시한다
+# (pydantic-settings의 extra="ignore" — 여분 env var가 있어도 에러 안 남).
+# ${...}는 `terraform output`으로 채운다(배포 가이드 참고).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hailcast-config
+  namespace: hailcast
+data:
+  AWS_REGION: ap-northeast-2
+  JSON_STORE_BACKEND: s3
+  S3_BUCKET: ${MODEL_BUCKET_NAME}
+  SQS_QUEUE_NAME: hailcast-dev-call-queue
+  SQS_QUEUE_URL: ${SQS_QUEUE_URL}
+  # --- DB (host/port/name만 — user/password는 ESO Secret에서, 02b-externalsecret.yaml) ---
+  DB_HOST: ${RDS_HOST}
+  DB_PORT: "5432"
+  DB_NAME: hailcast
+  # --- KEDA (predict) ---
+  KEDA_ENABLED: "true"
+  KEDA_NAMESPACE: hailcast
+  KEDA_SCALEDOBJECT_NAME: hailcast-worker-scaler
+  WORKER_DEPLOYMENT_NAME: hailcast-worker
+  # ⚠️ 인프라 규약(§8-2)이 요구하는 값(5h) — 앱 코드 기본값(14400=4h)보다 1시간 여유를 더 준다.
+  # ConfigMap에서 빠지면 코드 기본값(14400)으로 동작 — 여유 없이 딱 맞물리니 반드시 넣을 것.
+  PREDICTION_MAX_AGE_SECONDS: "18000"
+  K8S_NODES_ENABLED: "true"
+  LOG_LEVEL: INFO

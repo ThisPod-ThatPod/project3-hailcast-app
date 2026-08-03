@@ -1,0 +1,22 @@
+# 예시: worker KEDA ScaledObject — 반응(SQS 큐 길이) + 예측(minReplicaCount Patch) 결합
+# minReplicaCount는 predict의 ScalerService가 예측 기반으로 Patch한다 (선제 하한선).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: hailcast-worker-scaler   # predict의 KEDA_SCALEDOBJECT_NAME과 일치해야 함
+  # 07-13 네이밍 규약에 따른 변수명 및 코드 수정 중 A-3. 매니페스트에 Namespace 미명시
+  namespace: hailcast            # 네이밍규약서 §8 — 앱 워크로드 네임스페이스 (scaleTargetRef 대상과 동일 ns 필수)
+spec:
+  scaleTargetRef:
+    name: hailcast-worker
+  minReplicaCount: 1              # ← Predictive Scaling이 이 값을 갱신
+  maxReplicaCount: 20
+  cooldownPeriod: 120
+  triggers:
+    - type: aws-sqs-queue
+      metadata:
+        queueURL: <SQS_QUEUE_URL>
+        queueLength: "20"          # 메시지 20개당 Pod 1개
+        awsRegion: ap-northeast-2
+      authenticationRef:
+        name: hailcast-keda-auth   # IRSA 기반 TriggerAuthentication
