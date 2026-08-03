@@ -96,7 +96,7 @@ k8s Probe 와 ALB healthcheck-path 가 이 경로를 직접 보기 때문이다.
 | weather-cron | `GET /weather/status` | 최근 수집 상태·last_error (ALB 미노출 · 접두어 없음) |
 | predict | `GET /api/prediction/latest` `/api/prediction/status` | 예측 조회 |
 | | `GET /api/scaling/status` `/api/scaling/current` | 스케일링 상태·현재 결정 |
-| | `GET /api/dashboard/summary` `/dashboard/traffic-history` `/dashboard/pod-forecast` | 통합 Dashboard |
+| | `GET /api/dashboard/summary` `/api/dashboard/traffic-history` `/api/dashboard/pod-forecast` | 통합 Dashboard |
 | | `GET /health` `/ready` `/live` `/metrics` | 상태·Probe·Prometheus (루트 유지) |
 | 공통 | `GET /healthz` | 서비스별 기본 헬스체크 (루트 유지) |
 
@@ -116,8 +116,8 @@ forecast는 weather-cron과 같은 4시간 주기지만 **3분 늦춰 정렬**(0
 
 ## Prediction (Forecast Pipeline)
 
-S3 latest 모델 로드(버전 캐시, 재학습 자동 반영) → 구역별 최신 날씨(FileStore CSV)+최근 콜이력 →
-`ml/features.py` 공유 피처(train-serve skew 방지) → LightGBM → **서울 9개 구역 × 4시간(1시간 버킷)** 예측 →
+S3 latest 모델 로드(버전 캐시, 재학습 자동 반영) → 뉴욕 날씨(FileStore CSV)+최근 콜이력 →
+`ml/features.py` 공유 피처(train-serve skew 방지) → LightGBM → **뉴욕 날씨 기반 글로벌 수요 × 4시간(1시간 버킷)** 예측 →
 FileStore `predictions/latest.json`(+ latest.csv + 이력). `predicted_taxi_demand`가 Scaling 기준값이다.
 
 ## Predictive Scaling (2계층 · 결과는 KEDA `minReplicaCount` 하나로 합류)
@@ -137,7 +137,7 @@ predict의 `minReplicaCount` Patch(예측 선제)가 **같은 ScaledObject에서
 
 ## Simulator
 
-실서비스와 동일한 `CallRequest` 모델로 서울 9개 구역 가중치 기반 현실적 트래픽을 **k6**로 생성한다.
+실서비스와 동일한 `CallRequest` 모델로 현실적인 트래픽을 **k6**로 생성한다(좌표·zone_id 없는 단일 페이로드, B1).
 TPS 변경(`TRAFFIC_STEP` 단위)은 즉시 반영, `MIN_TPS`=0(정지)~`MAX_TPS`=600. `burst`는 큐를 순간적으로
 채워 반응형 스케일링을 확실히 트리거하기 위한 버튼(기본 10000건). 상태는 FileStore(status.json)로 대시보드와 공유.
 
