@@ -78,6 +78,19 @@ class PredictSettings(BaseAppSettings):
     k8s_nodes_enabled: bool = False
     k8s_nodes_stub_count: int = 1                 # InMemory Adapter가 반환할 고정 노드 수
 
+    # --- 오답노트 (C10) — 예측 오차가 큰 건을 DynamoDB에 기록, 재학습 입력이 된다 ---
+    # [2026-08-14 팀 확정] 트리거는 **수요 기준**(모델 출력 predicted_demand vs 실측 수요).
+    # 파드수 기준안은 배제 — 사이에 ScalingDecisionEngine의 ceil()+clamp가 끼어 있어
+    # 비가역이라(파드 3개로는 원래 수요가 501인지 1000인지 복원 불가) 재학습 입력으로 쓸 수 없다.
+    # false: 기록 안 함(기본). true: 임계값 초과 건만 put_item 1건.
+    prediction_accuracy_log_enabled: bool = False
+    prediction_accuracy_table_name: str = "hailcast-dev-prediction-log"   # 인프라 리소스 #41
+    # |실제-예측| / max(예측, 1.0) 이 이 값을 넘으면 기록. 2026-08-14: 현재 구현값 0.3 유지 결정.
+    # 24시간 가동(야간 절전 폐지) 기준 대조 기회는 4h 주기로 하루 6회, 9일 약 54회다.
+    # 그중 30%를 넘게 틀린 건만 적재되므로 실제 건수는 8/19에 확인하고, 표본이 부족하면
+    # 이 값을 하향(0.15~0.2)한다 — 수집 주기를 건드리는 것보다 파급이 작다.
+    prediction_accuracy_error_ratio_threshold: float = 0.3
+
     # --- Dashboard / Health ---
     health_queue_backlog_warning: int = 1000      # 큐 적체 경고 임계값
     # weather-cron 주기(4h)보다 넉넉히 여유를 둔 신선도 경고 임계값 (5시간)
