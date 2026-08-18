@@ -195,6 +195,36 @@ jobs:
       #
       # ⚠️ owner·repositories 를 반드시 지정한다. 생략하면 토큰이 '이 워크플로가 도는 레포'
       #    (= app) 로만 스코프돼 manifests 체크아웃이 404 로 죽는다. 크로스 레포가 요점이다.
+      # GitHub Actions 는 '존재하지 않는 시크릿'을 에러가 아니라 빈 문자열로 넘긴다.
+      # 이름을 한 글자만 틀려도(MANIFESTS_APP_ID vs APP_ID 등) 아래 토큰 발급이
+      # 자격증명 오류로 죽는데, 메시지만 봐서는 '키가 틀렸나 / 설치를 안 했나 /
+      # 이름을 틀렸나'가 구분되지 않는다. 여기서 먼저 끊어 원인을 특정한다.
+      - name: Preflight — App 시크릿 존재 확인
+        env:
+          APP_ID: ${{ secrets.MANIFESTS_APP_ID }}
+          APP_KEY: ${{ secrets.MANIFESTS_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          if [ -z "${APP_ID}" ]; then
+            echo "::error::시크릿 MANIFESTS_APP_ID 가 비어 있다(미등록이거나 이름 불일치)."
+            missing=1
+          fi
+          if [ -z "${APP_KEY}" ]; then
+            echo "::error::시크릿 MANIFESTS_APP_PRIVATE_KEY 가 비어 있다(미등록이거나 이름 불일치)."
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            echo "::error::app 레포 Settings > Secrets and variables > Actions 에서 이름을 확인한다. 이름은 대소문자까지 정확히 일치해야 한다."
+            exit 1
+          fi
+          # 값은 절대 출력하지 않는다. 형식만 본다.
+          case "${APP_KEY}" in
+            *"BEGIN"*"PRIVATE KEY"*) : ;;
+            *) echo "::error::MANIFESTS_APP_PRIVATE_KEY 가 PEM 형식이 아니다. -----BEGIN ... PRIVATE KEY----- 부터 END 줄까지 전문을 넣었는지 확인한다."; exit 1 ;;
+          esac
+          echo "시크릿 2개 확인 완료 (App ID 길이=${#APP_ID}, 키 길이=${#APP_KEY})"
+
       - name: Mint manifests token (GitHub App)
         id: app-token
         uses: actions/create-github-app-token@v2
@@ -288,8 +318,9 @@ jobs:
 
           # 표시용일 뿐 권한과는 무관하다 — 룰셋 bypass 는 커밋에 적힌 이름이 아니라
           # push 에 실제로 쓰인 토큰(위 App 설치 토큰)으로 판정된다.
-          # app-slug 는 App 이름에서 나오므로 App 을 hailcast-ci 로 만들었다면
-          # 결과 문자열이 종전과 같아 커밋 히스토리가 끊기지 않는다.
+          # app-slug 는 App 이름에서 자동으로 나온다(소문자·공백은 하이픈).
+          # App 이름이 hailcast-ci 면 결과가 종전 문자열과 같아 히스토리가 안 끊긴다.
+          # 다른 이름으로 만들었다면 이 커밋부터 작성자 표기가 바뀐다 — 동작에는 영향 없다.
           git config user.name  "${{ steps.app-token.outputs.app-slug }}[bot]"
           git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
 
