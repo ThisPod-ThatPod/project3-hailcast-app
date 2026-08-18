@@ -1,5 +1,5 @@
 # DynamoDB Adapter — Service는 boto3를 직접 호출하지 않고 이 Adapter만 사용한다.
-# 오답노트(hailcast-dev-prediction-log, 인프라 리소스 #41) 전용 — put_item 하나만 필요.
+# 오답노트(hailcast-dev-prediction-log, 인프라 리소스 #41) 전용 — put_item + scan_all.
 from botocore.exceptions import BotoCoreError, ClientError
 
 from common.aws.client_factory import AwsClientFactory
@@ -28,3 +28,20 @@ class DynamoDbAdapter:
             self._client.put_item(TableName=self._table_name, Item=item)
         except (ClientError, BotoCoreError) as exc:
             raise self._wrap("put_item", exc) from exc
+
+    def scan_all(self) -> list[dict]:
+        """테이블 전체를 페이지네이션하며 읽는다. 재학습 수동 트리거가 오답노트 현황을
+        확인하는 용도 — 사람이 가끔 호출하는 저빈도 경로라 별도 인덱스/필터 없이 scan으로 충분하다."""
+        items: list[dict] = []
+        try:
+            kwargs: dict = {"TableName": self._table_name}
+            while True:
+                response = self._client.scan(**kwargs)
+                items.extend(response.get("Items", []))
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                kwargs["ExclusiveStartKey"] = last_key
+        except (ClientError, BotoCoreError) as exc:
+            raise self._wrap("scan", exc) from exc
+        return items

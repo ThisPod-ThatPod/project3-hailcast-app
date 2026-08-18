@@ -14,6 +14,13 @@ class WorkerSettings(BaseAppSettings):
     sqs_retry_count: int = 5            # 이 횟수 초과 재수신 시 FAILED 처리 (향후 DLQ 대상)
     poll_idle_interval: float = 0.0     # 빈 폴링 후 추가 대기 (Long Polling이 있어 기본 0)
 
+    # --- Liveness Probe (하트비트 파일, 2026-08-18) ---
+    # pgrep은 프로세스 생존만 확인하고 폴링이 실제로 성공하는지는 못 봄(AwsError로
+    # 계속 실패해도 루프 자체는 안 죽음) — poll_once() 성공마다 이 파일을 touch해서
+    # K8s probe가 파일 최신성으로 "실제 동작 중"을 판단하게 한다.
+    # readOnlyRootFilesystem=true라 emptyDir 볼륨 마운트가 이 경로에 필요함(매니페스트 쪽 작업).
+    heartbeat_file_path: str = "/var/run/heartbeat/worker.heartbeat"
+
     # 로컬(LocalStack) 큐 자동 생성
     sqs_auto_create_queue: bool = False
     # 로컬(LocalStack/moto) 버킷 자동 생성
