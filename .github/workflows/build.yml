@@ -189,13 +189,30 @@ jobs:
       # 이번 실행에서 실제로 빌드된 서비스. 이 목록만 갱신한다.
       BUILT: ${{ needs.detect.outputs.list }}
     steps:
+      # 크로스 레포 자격증명을 개인 PAT 이 아니라 GitHub App 설치 토큰으로 받는다.
+      # PAT 은 발급한 사람 계정에 묶여 있어 그 사람이 빠지거나 토큰을 회수하면 CD 가 멈춘다.
+      # App 토큰은 사람에 안 묶이고 1 시간 만료라 유출 영향도 짧다.
+      #
+      # ⚠️ owner·repositories 를 반드시 지정한다. 생략하면 토큰이 '이 워크플로가 도는 레포'
+      #    (= app) 로만 스코프돼 manifests 체크아웃이 404 로 죽는다. 크로스 레포가 요점이다.
+      - name: Mint manifests token (GitHub App)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.MANIFESTS_APP_ID }}
+          private-key: ${{ secrets.MANIFESTS_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: project3-hailcast-manifests
+
       - name: Checkout manifests
         uses: actions/checkout@v4
         with:
           repository: ${{ env.MANIFESTS_REPO }}
           ref: ${{ env.BASE_BRANCH }}
           # 크로스 레포라 기본 GITHUB_TOKEN 으로는 접근할 수 없다.
-          token: ${{ secrets.MANIFESTS_PAT }}
+          # actions/checkout 이 이 토큰을 remote URL 에 심어두므로, 아래 git push 는
+          # 따로 손댈 필요 없이 그대로 App 자격으로 나간다.
+          token: ${{ steps.app-token.outputs.token }}
           # 얕은 클론에서는 아래 재시도의 rebase 가 제대로 동작하지 않는다.
           fetch-depth: 0
 
@@ -269,8 +286,12 @@ jobs:
             exit 0
           fi
 
-          git config user.name  "hailcast-ci[bot]"
-          git config user.email "hailcast-ci[bot]@users.noreply.github.com"
+          # 표시용일 뿐 권한과는 무관하다 — 룰셋 bypass 는 커밋에 적힌 이름이 아니라
+          # push 에 실제로 쓰인 토큰(위 App 설치 토큰)으로 판정된다.
+          # app-slug 는 App 이름에서 나오므로 App 을 hailcast-ci 로 만들었다면
+          # 결과 문자열이 종전과 같아 커밋 히스토리가 끊기지 않는다.
+          git config user.name  "${{ steps.app-token.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.app-token.outputs.app-slug }}[bot]@users.noreply.github.com"
 
           # 어떤 서비스가 바뀌었는지는 스테이징된 파일에서 뽑는다.
           # 커밋 메시지에 서비스명을 하드코딩하면 목록이 늘 때 또 어긋난다.
@@ -278,7 +299,8 @@ jobs:
           svcs="$(git diff --cached --name-only | sed -E 's|apps/([^/]+)/.*|\1|' | sort -u | paste -sd, -)"
 
           # [skip ci]: 지금 manifests 에는 워크플로가 하나도 없어 당장은 무해하다.
-          # 다만 PAT 로 push 하면 GitHub 의 기본 루프 방지가 걸리지 않으므로 미리 넣어 둔다.
+          # 다만 App 설치 토큰으로 push 하면 GitHub 의 기본 루프 방지가 걸리지 않으므로
+          # 미리 넣어 둔다(면제되는 건 GITHUB_TOKEN 뿐이다. PAT 시절과 근거가 같다).
           git commit \
             -m "chore(deploy): ${svcs} 이미지 태그 ${TAG} 로 갱신 [skip ci]" \
             -m "app 레포 커밋: ${GITHUB_SHA}" \
