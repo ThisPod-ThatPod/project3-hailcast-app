@@ -91,6 +91,13 @@ class PredictSettings(BaseAppSettings):
     # 이 값을 하향(0.15~0.2)한다 — 수집 주기를 건드리는 것보다 파급이 작다.
     prediction_accuracy_error_ratio_threshold: float = 0.3
 
+    # --- 대조 스케줄러 (2026-08-19) — 오답노트 배선(위)만으론 아무도 record_if_needed를
+    # 안 불러서 0건이었음. 매시 :59분(정시 직전 — 그 시간창 실측이 거의 다 쌓인 시점)에
+    # scaler_service의 last_predicted_demand(이번 시간창 예측)와 실측 트래픽(G2와 동일 정의,
+    # dashboard/traffic.json hourly_requests)을 비교해서 기록한다.
+    accuracy_check_interval_seconds: float = 3600.0
+    accuracy_check_align_offset_seconds: float = 59 * 60.0
+
     # --- Dashboard / Health ---
     health_queue_backlog_warning: int = 1000      # 큐 적체 경고 임계값
     # weather-cron 주기(4h)보다 넉넉히 여유를 둔 신선도 경고 임계값 (5시간)
