@@ -3,6 +3,22 @@
 이 Pod 저 Pod · **hailcast** 프로젝트 **app 레포**의 Makefile 과 셸 스크립트 설명서.
 로컬 테스트 환경(docker compose) 기동과 ECR 배포(build→push)를 `make` 한 번으로 돌리기 위한 도구들이다.
 
+> ## ⚠️ 실제 EKS 운영 환경에서는 이 레포의 배포·정리 스크립트가 "공식 경로"가 아니다
+>
+> - **Docker image build → ECR push : GitHub Actions 가 담당한다.**
+>   `dev`/`main` 브랜치에 push 되면 `.github/workflows/build.yml` 이 변경된 서비스만 감지해
+>   build·push 하고, manifests 레포의 이미지 태그까지 자동 갱신한다. 이 레포의
+>   `build_push.sh`/`make build-push`/`deploy_infra.sh`/`make deploy-all` 은 **로컬 수동 실행용**이지
+>   운영 배포의 공식 경로가 아니다.
+> - **teardown(정리) 은 manifest 레포의 Makefile 작업으로 진행한다.**
+>   EKS 위 워크로드(네임스페이스·ArgoCD Application)는 manifests 레포 소관이다. 이 레포의
+>   `teardown_infra.sh`/`make teardown-infra` 로 직접 지우지 않는다.
+>   **이 레포에서 계속 필요한 건 로컬 정리(`teardown_app.sh`/`make teardown`) 뿐이다** —
+>   AWS/EKS 가 아니라 이 서버(로컬)에 쌓인 docker 이미지·컨테이너·볼륨·빌드캐시를 치우는 용도라
+>   GitHub Actions·manifest 어느 쪽도 대신해줄 수 없다.
+>
+> 아래 문서는 이 레포 스크립트들의 사용법 설명이며, 이게 배포·정리의 유일한 경로라는 뜻은 아니다.
+
 설계는 ops 레포(`project3-hailcast-ops`)의 패턴을 따른다 — 계정 가드 · `.env` 안전 파싱 · CONFIRM 스위치 · 공용 상수 단일화.
 
 ---

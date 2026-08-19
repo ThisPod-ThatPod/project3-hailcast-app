@@ -2,6 +2,7 @@
 from functools import lru_cache
 
 from common.aws.client_factory import AwsClientFactory
+from common.aws.dynamodb_adapter import DynamoDbAdapter
 from common.aws.s3_adapter import S3Adapter
 from common.aws.sqs_adapter import SqsAdapter
 from common.core.store import FileStore
@@ -20,6 +21,7 @@ from schedulers.forecast_scheduler import ForecastScheduler
 from schedulers.scaling_scheduler import ScalingScheduler
 from schedulers.traffic_scheduler import TrafficScheduler
 from services.pod_forecast_service import PodForecastService
+from services.prediction_accuracy_logger import PredictionAccuracyLogger
 from services.prediction_reader import DbPredictionReader, PredictionReader
 from services.prediction_service import PredictionService
 from services.scaler_service import ScalerService
@@ -187,18 +189,35 @@ def get_health_service():
     )
 
 
-# ---------- C10: DynamoDB 오답노트 (2026-07-16, 트리거/필드 설계 미확정 — 배선 보류) ----------
-# 팀 확정되면 아래 주석만 풀면 됨(구현은 services/prediction_accuracy_logger.py에 이미 있음).
-# 확정 후엔 K8S_NODES_ENABLED류 env 플래그(예: PREDICTION_ACCURACY_LOG_ENABLED)로
-# on/off 하는 형태가 될 가능성이 높음 — 지금은 설정값 자체가 없어서 하드코딩 자리표시만 남김.
+# ---------- C10: DynamoDB 오답노트 ----------
+# [2026-08-14] 2026-07-16부터 "트리거/필드 설계 미확정"으로 주석 처리돼 있던 배선을 해제한다.
+# 팀 확정: 트리거는 **수요 기준**(predicted_demand vs 실측 수요) — config.py 주석 참조.
 #
-# @lru_cache
-# def get_dynamodb_adapter() -> DynamoDbAdapter:
-#     settings = get_settings()
-#     factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
-#     return DynamoDbAdapter(factory, table_name="hailcast-dev-prediction-log")  # 인프라 #41
+# ⚠️ 아직 호출부가 없다. 예측 vs 실측을 시간 정렬해 비교하는 스케줄러(대조 스케줄러)가
+#    별도 작업으로 남아 있고, record_if_needed()에 actual_demand를 넘겨주는 곳은 그때 생긴다.
+#    그때까지 이 provider는 조립만 되어 있고 아무도 호출하지 않는다.
 #
-#
-# @lru_cache
-# def get_prediction_accuracy_logger() -> PredictionAccuracyLogger:
-#     return PredictionAccuracyLogger(get_dynamodb_adapter(), error_ratio_threshold=0.3)  # 임계값 미정, 예시값
+# ⚠️ 운영에서 켜려면 앱 코드만으로는 부족하다 — manifests 레포 apps/predict/deployment.yaml 에
+#    PREDICTION_ACCURACY_LOG_ENABLED env 를 추가해야 실제로 동작한다(이 레포 k8s/ 는 배포 소스가
+#    아니다). 그리고 predict IRSA 에 dynamodb:PutItem 권한이 있어야 put 이 성공한다.
+@lru_cache
+def get_dynamodb_adapter() -> DynamoDbAdapter:
+    settings = get_settings()
+    factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
+    return DynamoDbAdapter(factory, table_name=settings.prediction_accuracy_table_name)
+
+
+@lru_cache
+def get_prediction_accuracy_logger() -> PredictionAccuracyLogger | None:
+    """플래그가 꺼져 있으면 None — 호출부가 None 체크로 on/off를 판단한다.
+
+    None을 돌려주는 동안에는 get_dynamodb_adapter()가 호출되지 않으므로
+    DynamoDB 클라이언트도, 그에 필요한 IAM 권한도 요구하지 않는다.
+    """
+    settings = get_settings()
+    if not settings.prediction_accuracy_log_enabled:
+        return None
+    return PredictionAccuracyLogger(
+        get_dynamodb_adapter(),
+        error_ratio_threshold=settings.prediction_accuracy_error_ratio_threshold,
+    )
