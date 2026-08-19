@@ -16,10 +16,12 @@ from adapters.kubernetes_node_adapter import KubernetesNodeAdapter
 from adapters.node_adapter import NodeAdapter
 from config import get_settings
 from ml_runtime.model_loader import ModelLoader
+from schedulers.accuracy_check_scheduler import AccuracyCheckScheduler
 from schedulers.backup_scheduler import BackupScheduler
 from schedulers.forecast_scheduler import ForecastScheduler
 from schedulers.scaling_scheduler import ScalingScheduler
 from schedulers.traffic_scheduler import TrafficScheduler
+from services.accuracy_check_service import AccuracyCheckService
 from services.pod_forecast_service import PodForecastService
 from services.prediction_accuracy_logger import PredictionAccuracyLogger
 from services.prediction_reader import DbPredictionReader, PredictionReader
@@ -193,9 +195,8 @@ def get_health_service():
 # [2026-08-14] 2026-07-16부터 "트리거/필드 설계 미확정"으로 주석 처리돼 있던 배선을 해제한다.
 # 팀 확정: 트리거는 **수요 기준**(predicted_demand vs 실측 수요) — config.py 주석 참조.
 #
-# ⚠️ 아직 호출부가 없다. 예측 vs 실측을 시간 정렬해 비교하는 스케줄러(대조 스케줄러)가
-#    별도 작업으로 남아 있고, record_if_needed()에 actual_demand를 넘겨주는 곳은 그때 생긴다.
-#    그때까지 이 provider는 조립만 되어 있고 아무도 호출하지 않는다.
+# [2026-08-19] 호출부(대조 스케줄러) 추가 완료 — AccuracyCheckScheduler/Service가
+# record_if_needed()에 매시 :59분 predicted/actual을 넘긴다(get_accuracy_check_scheduler 참고).
 #
 # ⚠️ 운영에서 켜려면 앱 코드만으로는 부족하다 — manifests 레포 apps/predict/deployment.yaml 에
 #    PREDICTION_ACCURACY_LOG_ENABLED env 를 추가해야 실제로 동작한다(이 레포 k8s/ 는 배포 소스가
@@ -220,4 +221,25 @@ def get_prediction_accuracy_logger() -> PredictionAccuracyLogger | None:
     return PredictionAccuracyLogger(
         get_dynamodb_adapter(),
         error_ratio_threshold=settings.prediction_accuracy_error_ratio_threshold,
+    )
+
+
+@lru_cache
+def get_accuracy_check_service() -> AccuracyCheckService:
+    settings = get_settings()
+    return AccuracyCheckService(
+        get_scaler_service(),
+        get_file_store(),
+        settings,
+        get_prediction_accuracy_logger(),
+    )
+
+
+@lru_cache
+def get_accuracy_check_scheduler() -> AccuracyCheckScheduler:
+    settings = get_settings()
+    return AccuracyCheckScheduler(
+        get_accuracy_check_service(),
+        settings.accuracy_check_interval_seconds,
+        settings.accuracy_check_align_offset_seconds,
     )
