@@ -229,6 +229,7 @@ def get_accuracy_check_service() -> AccuracyCheckService:
     settings = get_settings()
     return AccuracyCheckService(
         get_scaler_service(),
+        get_prediction_reader(),
         get_file_store(),
         settings,
         get_prediction_accuracy_logger(),
