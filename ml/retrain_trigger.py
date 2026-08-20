@@ -10,10 +10,16 @@
 # MIN_RECORDS_FOR_TRAINING건 미만이면 기본적으로 학습을 안 하고 현황만 보여준다.
 # --force로 미만이어도 강행할 수 있지만(파이프라인 자체 검증용), 실제 운영 판단으로 쓰면 안 된다.
 #
-# 실행 환경(로컬 vs 전용 파드)은 아직 미정 — 이 스크립트는 어느 쪽이든 그대로 쓸 수 있게
-# 실행 위치에 대한 가정을 두지 않는다.
+# [2026-08-20] "학습여부"(0/1) 필터링 추가 — 이미 이전 배치에서 학습에 쓴 레코드는 다시
+# 안 쓴다. 이전 스키마(날씨 필드 없음)로 남은 레거시 레코드는 개별적으로 건너뛴다(배치
+# 전체를 실패시키지 않음).
+#
+# 실행 방식(수동 vs 자동 스케줄)은 팀 결정 사항(§ 2026-08-20-retrain-pipeline-status.md) —
+# 이 스크립트는 어느 쪽이든(사람이 CLI로 직접 실행하거나, K8s CronJob의 entrypoint로) 그대로
+# 쓸 수 있게 실행 위치·트리거 방식에 대한 가정을 두지 않는다.
 import argparse
 import os
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import joblib
@@ -30,6 +36,7 @@ from train import LGBM_PARAMS
 
 MIN_RECORDS_FOR_TRAINING = 20   # 이 미만이면 과적합 위험이 커서 기본적으로 학습 안 함
 CONTINUED_N_ESTIMATORS = 30     # 이어학습 시 추가할 트리 수 — 원본(8000)과 별개로 작게 잡는다
+REQUIRED_COLUMNS = ["날짜", "요일", "온도", "습도", "강수유무", "승객수"]
 LOCAL_MODEL_PATH = "/tmp/hailcast-current-model.pkl"
 LOCAL_NEW_MODEL_PATH = "/tmp/hailcast-continued-model.pkl"
 
@@ -59,8 +66,24 @@ def fetch_accuracy_log(dynamodb: DynamoDbAdapter) -> list[dict]:
     return [_decode(item) for item in dynamodb.scan_all()]
 
 
-def summarize(items: list[dict]) -> None:
-    print(f"오답노트 {len(items)}건")
+def filter_untrained(items: list[dict]) -> list[dict]:
+    """학습여부가 없거나(구버전 레코드) 0인 것만 — 이미 1(학습에 씀)인 건 제외."""
+    return [item for item in items if int(item.get("학습여부", 0)) == 0]
+
+
+def split_usable(items: list[dict]) -> tuple[list[dict], list[dict]]:
+    """학습 필수 컬럼이 다 있는 것만 usable로, 없으면 skip(배치 전체를 실패시키지 않음)."""
+    usable, skipped = [], []
+    for item in items:
+        if all(col in item for col in REQUIRED_COLUMNS):
+            usable.append(item)
+        else:
+            skipped.append(item)
+    return usable, skipped
+
+
+def summarize(items: list[dict], label: str = "오답노트") -> None:
+    print(f"{label} {len(items)}건")
     if not items:
         return
     items = sorted(items, key=lambda r: r.get("target_time", ""))
@@ -74,12 +97,8 @@ def summarize(items: list[dict]) -> None:
 
 
 def continue_train(items: list[dict], s3: S3Adapter, settings: RetrainTriggerSettings):
-    """S3의 기존 모델을 불러와 오답노트 데이터로 이어학습한다. (model, n_new_trees) 반환."""
+    """S3의 기존 모델을 불러와 오답노트 데이터로 이어학습한다. 새 모델을 반환."""
     df = pd.DataFrame(items)
-    missing = [c for c in ["날짜", "요일", "온도", "습도", "강수유무", "승객수"] if c not in df.columns]
-    if missing:
-        raise ValueError(f"오답노트 레코드에 학습 필수 컬럼이 없습니다: {missing} — 날씨 필드가 없는 옛 레코드가 섞여있는지 확인하세요.")
-
     X = dataframe_to_features(df)
     y = df["승객수"].astype(float)
 
@@ -93,7 +112,7 @@ def continue_train(items: list[dict], s3: S3Adapter, settings: RetrainTriggerSet
     new_model = lgb.LGBMRegressor(**continued_params)
     new_model.fit(X, y, init_model=base_model.booster_)
     print(f"이어학습 완료 (전체 트리 수: {new_model.booster_.num_trees()})")
-    return new_model, X
+    return new_model
 
 
 def upload_continued_model(model, settings: RetrainTriggerSettings, record_count: int) -> None:
@@ -102,7 +121,6 @@ def upload_continued_model(model, settings: RetrainTriggerSettings, record_count
         joblib.dump(model, LOCAL_NEW_MODEL_PATH)
         print(f"로컬 저장: {LOCAL_NEW_MODEL_PATH}")
         return
-    from datetime import datetime, timezone
 
     joblib.dump(model, LOCAL_NEW_MODEL_PATH)
     factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
@@ -115,6 +133,12 @@ def upload_continued_model(model, settings: RetrainTriggerSettings, record_count
         {"version": version, "continued_training_records": record_count, "trained_at": version},
     )
     print(f"S3 업로드 완료 (version={version})")
+
+
+def mark_used_as_trained(items: list[dict], dynamodb: DynamoDbAdapter) -> None:
+    for item in items:
+        dynamodb.mark_trained(item["prediction_date"], item["target_time"])
+    print(f"학습여부=1로 마킹 완료 ({len(items)}건) — 다음 배치에서 재사용 안 됨")
 
 
 def main() -> None:
@@ -136,25 +160,35 @@ def main() -> None:
     dynamodb = DynamoDbAdapter(factory, table_name=settings.prediction_accuracy_table_name)
     s3 = S3Adapter(factory, bucket=settings.s3_bucket)
 
-    items = fetch_accuracy_log(dynamodb)
-    summarize(items)
+    all_items = fetch_accuracy_log(dynamodb)
+    untrained = filter_untrained(all_items)
+    print(f"전체 {len(all_items)}건 중 학습 미사용 {len(untrained)}건")
+    summarize(untrained, label="학습 미사용 오답노트")
 
-    if len(items) < MIN_RECORDS_FOR_TRAINING and not args.force:
+    if len(untrained) < MIN_RECORDS_FOR_TRAINING and not args.force:
         print(
-            f"오답노트가 {len(items)}/{MIN_RECORDS_FOR_TRAINING}건 — 아직 부족합니다. "
+            f"학습 미사용 오답노트가 {len(untrained)}/{MIN_RECORDS_FOR_TRAINING}건 — 아직 부족합니다. "
             f"{MIN_RECORDS_FOR_TRAINING}건 이상 쌓이면 자동으로 이어학습을 진행합니다. "
             "그래도 파이프라인만 검증하려면 --force를 붙이세요(과적합 위험 있음)."
         )
         return
 
+    usable, skipped = split_usable(untrained)
+    if skipped:
+        print(f"학습 필수 컬럼이 없어 건너뛴 레거시 레코드 {len(skipped)}건(날씨 필드 없는 구버전)")
+    if not usable:
+        print("학습 가능한 레코드가 없습니다(전부 구버전 스키마). 중단.")
+        return
+
     if not args.yes:
-        answer = input(f"오답노트 {len(items)}건으로 이어학습을 진행할까요? [y/N] ")
+        answer = input(f"오답노트 {len(usable)}건으로 이어학습을 진행할까요? [y/N] ")
         if answer.strip().lower() != "y":
             print("취소됨.")
             return
 
-    model, _ = continue_train(items, s3, settings)
-    upload_continued_model(model, settings, len(items))
+    model = continue_train(usable, s3, settings)
+    upload_continued_model(model, settings, len(usable))
+    mark_used_as_trained(usable, dynamodb)
 
 
 if __name__ == "__main__":

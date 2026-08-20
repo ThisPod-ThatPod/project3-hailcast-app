@@ -8,6 +8,9 @@
 # [2026-08-20] 재학습 시 ml/train.py가 바로 이어붙일 수 있도록, 학습 데이터와 동일한
 # 컬럼명(날짜·요일·온도·습도·강수유무·승객수)으로 저장한다(ml/features.py, weather_service.py
 # _CSV_FIELDS와 동일 스키마). "승객수"는 학습 라벨과 같은 의미로 실측 수요(actual_demand)를 쓴다.
+# [2026-08-20] "학습여부"(0/1) 추가 — ml/retrain_trigger.py가 이 값으로 이미 재학습에 쓴
+# 레코드를 걸러낸다(재사용 방지). 새로 기록되는 시점엔 항상 0, 재학습 완료 후
+# DynamoDbAdapter.mark_trained()가 1로 갱신한다.
 from datetime import datetime, timezone
 
 from common.aws.dynamodb_adapter import DynamoDbAdapter
@@ -56,6 +59,7 @@ class PredictionAccuracyLogger:
             "날짜": {"S": local_date},
             "요일": {"N": str(weekday)},
             "승객수": {"N": str(actual_demand)},
+            "학습여부": {"N": "0"},
         }
         if temperature is not None:
             item["온도"] = {"N": str(temperature)}
