@@ -1,26 +1,45 @@
-# 수동 재학습 트리거 — 오답노트(DynamoDB) 현황을 사람이 보고 판단해서 재학습을 실행한다.
-# 이번 스프린트 스코프: "오답노트가 쌓이고 수동 트리거로 재학습되는 데까지" — 자동
-# 스케줄링(대조 스케줄러가 오답노트를 언제·얼마나 채우는지)은 별도 결정 대상(§10 D-1)이라
-# 여기서는 관여하지 않는다. 오답노트가 비어 있어도(대조 스케줄러 미구현 상태) --force로
-# 재학습 자체는 그대로 검증할 수 있다.
+# 수동 재학습 트리거 — 오답노트(DynamoDB)가 일정량 쌓이면, S3의 기존 모델에 "이어학습"한다.
+#
+# [2026-08-20] 원본 학습 CSV(ml/data/)는 .gitignore 대상이라 어떤 이미지에도 안 들어있어서
+# (로컬 개발자 PC 밖에는 존재하지 않음) — from-scratch 재학습은 파드/CI 어디서도 못 돌린다.
+# 그래서 "S3에 있는 기존 모델을 불러와서, 오답노트 데이터만으로 이어서 부스팅한다" 방식으로
+# 바꿨다. LightGBM sklearn API의 init_model 파라미터로 기존 트리 위에 새 트리를 추가하는
+# continued-training — 원본 데이터가 없어도, 이미 학습된 모델 파일과 오답노트만 있으면 된다.
+#
+# ⚠️ 오답노트가 적을 때 그대로 학습하면 그 몇 건에 극심하게 과적합된다. 그래서
+# MIN_RECORDS_FOR_TRAINING건 미만이면 기본적으로 학습을 안 하고 현황만 보여준다.
+# --force로 미만이어도 강행할 수 있지만(파이프라인 자체 검증용), 실제 운영 판단으로 쓰면 안 된다.
 #
 # 실행 환경(로컬 vs 전용 파드)은 아직 미정 — 이 스크립트는 어느 쪽이든 그대로 쓸 수 있게
-# 실행 위치에 대한 가정을 두지 않는다(로컬 CLI로 바로 돌리거나, 나중에 파드/Job의
-# entrypoint로 그대로 넣어도 코드 변경이 필요 없다).
+# 실행 위치에 대한 가정을 두지 않는다.
 import argparse
+import os
 from decimal import Decimal
+
+import joblib
+import lightgbm as lgb
+import pandas as pd
 
 from common.aws.client_factory import AwsClientFactory
 from common.aws.dynamodb_adapter import DynamoDbAdapter
+from common.aws.s3_adapter import S3Adapter
 from common.core.settings import BaseAppSettings
 
-from train import MODEL_PATH, save_model, train, upload_to_s3
+from features import dataframe_to_features
+from train import LGBM_PARAMS
+
+MIN_RECORDS_FOR_TRAINING = 20   # 이 미만이면 과적합 위험이 커서 기본적으로 학습 안 함
+CONTINUED_N_ESTIMATORS = 30     # 이어학습 시 추가할 트리 수 — 원본(8000)과 별개로 작게 잡는다
+LOCAL_MODEL_PATH = "/tmp/hailcast-current-model.pkl"
+LOCAL_NEW_MODEL_PATH = "/tmp/hailcast-continued-model.pkl"
 
 
 class RetrainTriggerSettings(BaseAppSettings):
     service_name: str = "ml-retrain-trigger"
     # predict/config.py의 prediction_accuracy_table_name과 반드시 같은 값이어야 한다.
     prediction_accuracy_table_name: str = "hailcast-dev-prediction-log"
+    model_s3_prefix: str = "models"
+    ml_s3_upload_enabled: bool = False   # train.py와 동일 관례 — 명시적으로 켜야 S3에 씀
 
 
 def _decode(item: dict) -> dict:
@@ -54,12 +73,56 @@ def summarize(items: list[dict]) -> None:
         print(f"  ... 외 {len(items) - 10}건 (최근 10건만 표시)")
 
 
+def continue_train(items: list[dict], s3: S3Adapter, settings: RetrainTriggerSettings):
+    """S3의 기존 모델을 불러와 오답노트 데이터로 이어학습한다. (model, n_new_trees) 반환."""
+    df = pd.DataFrame(items)
+    missing = [c for c in ["날짜", "요일", "온도", "습도", "강수유무", "승객수"] if c not in df.columns]
+    if missing:
+        raise ValueError(f"오답노트 레코드에 학습 필수 컬럼이 없습니다: {missing} — 날씨 필드가 없는 옛 레코드가 섞여있는지 확인하세요.")
+
+    X = dataframe_to_features(df)
+    y = df["승객수"].astype(float)
+
+    os.makedirs(os.path.dirname(LOCAL_MODEL_PATH), exist_ok=True)
+    s3.download_file(f"{settings.model_s3_prefix}/latest/model.pkl", LOCAL_MODEL_PATH)
+    base_model = joblib.load(LOCAL_MODEL_PATH)
+    print(f"기존 모델 로드 완료 (기존 트리 수: {base_model.booster_.num_trees()})")
+
+    continued_params = dict(LGBM_PARAMS)
+    continued_params["n_estimators"] = CONTINUED_N_ESTIMATORS
+    new_model = lgb.LGBMRegressor(**continued_params)
+    new_model.fit(X, y, init_model=base_model.booster_)
+    print(f"이어학습 완료 (전체 트리 수: {new_model.booster_.num_trees()})")
+    return new_model, X
+
+
+def upload_continued_model(model, settings: RetrainTriggerSettings, record_count: int) -> None:
+    if not settings.ml_s3_upload_enabled:
+        print("ML_S3_UPLOAD_ENABLED=false — S3 업로드 스킵 (로컬 저장만 함)")
+        joblib.dump(model, LOCAL_NEW_MODEL_PATH)
+        print(f"로컬 저장: {LOCAL_NEW_MODEL_PATH}")
+        return
+    from datetime import datetime, timezone
+
+    joblib.dump(model, LOCAL_NEW_MODEL_PATH)
+    factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
+    s3 = S3Adapter(factory, bucket=settings.s3_bucket)
+    version = f"continued-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+    prefix = f"{settings.model_s3_prefix}/latest"
+    s3.upload_file(f"{prefix}/model.pkl", LOCAL_NEW_MODEL_PATH)
+    s3.upload_json(
+        f"{prefix}/metadata.json",
+        {"version": version, "continued_training_records": record_count, "trained_at": version},
+    )
+    print(f"S3 업로드 완료 (version={version})")
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="오답노트 현황을 확인하고 수동으로 재학습을 트리거한다.")
+    parser = argparse.ArgumentParser(description="오답노트 현황을 확인하고, 쌓였으면 기존 모델에 이어학습한다.")
     parser.add_argument(
         "--force",
         action="store_true",
-        help="오답노트가 비어 있어도(대조 스케줄러 미구현 상태 포함) 재학습을 강행한다.",
+        help=f"오답노트가 {MIN_RECORDS_FOR_TRAINING}건 미만이어도 이어학습을 강행한다(파이프라인 검증용 — 과적합 위험 인지하고 사용).",
     )
     parser.add_argument(
         "--yes",
@@ -71,24 +134,27 @@ def main() -> None:
     settings = RetrainTriggerSettings()
     factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
     dynamodb = DynamoDbAdapter(factory, table_name=settings.prediction_accuracy_table_name)
+    s3 = S3Adapter(factory, bucket=settings.s3_bucket)
 
     items = fetch_accuracy_log(dynamodb)
     summarize(items)
 
-    if not items and not args.force:
-        print("오답노트가 비어 있습니다. 그래도 재학습 파이프라인 자체를 검증하려면 --force를 붙이세요.")
+    if len(items) < MIN_RECORDS_FOR_TRAINING and not args.force:
+        print(
+            f"오답노트가 {len(items)}/{MIN_RECORDS_FOR_TRAINING}건 — 아직 부족합니다. "
+            f"{MIN_RECORDS_FOR_TRAINING}건 이상 쌓이면 자동으로 이어학습을 진행합니다. "
+            "그래도 파이프라인만 검증하려면 --force를 붙이세요(과적합 위험 있음)."
+        )
         return
 
     if not args.yes:
-        answer = input(f"오답노트 {len(items)}건 확인됨. 재학습을 진행할까요? [y/N] ")
+        answer = input(f"오답노트 {len(items)}건으로 이어학습을 진행할까요? [y/N] ")
         if answer.strip().lower() != "y":
             print("취소됨.")
             return
 
-    model, mae, rmse = train()
-    save_model(model)
-    upload_to_s3(MODEL_PATH, mae, rmse)
-    print(f"재학습 완료 — MAE={mae:.2f} RMSE={rmse:.2f}")
+    model, _ = continue_train(items, s3, settings)
+    upload_continued_model(model, settings, len(items))
 
 
 if __name__ == "__main__":
