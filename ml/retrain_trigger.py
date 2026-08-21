@@ -19,6 +19,7 @@
 # 쓸 수 있게 실행 위치·트리거 방식에 대한 가정을 두지 않는다.
 import argparse
 import os
+import sys
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -181,6 +182,14 @@ def main() -> None:
         return
 
     if not args.yes:
+        # [2026-08-20] K8s Job엔 보통 stdin이 안 붙는다(stdin: true 명시 안 하면) — 이 상태로
+        # input()을 부르면 즉시 EOFError로 죽거나(최악의 경우 붙어있으면) 영원히 걸린다.
+        # backoffLimit=0이라 재시도도 없어서, 그냥 죽는 건 낫지만 원인이 트레이스백에 안 보이면
+        # "왜 죽었지" 삽질하게 된다 — 여기서 미리 잡아서 명확한 이유를 남기고 종료한다.
+        if not sys.stdin.isatty():
+            print("비대화형 환경(stdin 없음)에서 --yes 없이 실행됨 — 확인 프롬프트를 띄울 수 없습니다. "
+                  "K8s Job/CronJob에서는 command에 --yes를 반드시 포함하세요.")
+            sys.exit(1)
         answer = input(f"오답노트 {len(usable)}건으로 이어학습을 진행할까요? [y/N] ")
         if answer.strip().lower() != "y":
             print("취소됨.")
