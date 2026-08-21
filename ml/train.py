@@ -24,7 +24,6 @@ class MlTrainSettings(BaseAppSettings):
 
 DATA_PATH = Path(__file__).parent / "data" / "nycTaxiWeather.csv"
 MODEL_PATH = Path(__file__).parent / "latest_model8.pkl"
-LEARNING_CURVE_PATH = Path(__file__).parent / "learning_curve8.png"
 
 VALID_RATIO = 0.15
 
@@ -60,31 +59,6 @@ def time_based_split(df: pd.DataFrame, valid_ratio: float = VALID_RATIO):
     return df.iloc[:split_idx], df.iloc[split_idx:]
 
 
-def plot_learning_curve(model: lgb.LGBMRegressor, path: Path = LEARNING_CURVE_PATH) -> None:
-    # [2026-08-21] matplotlib은 여기서만 쓴다 — 모듈 상단에서 import하면 `from train import
-    # LGBM_PARAMS` 한 줄만으로도 train.py 전체가 실행돼서, matplotlib이 없는 predict 이미지에서
-    # 도는 재학습 CronJob(ml/retrain_trigger.py)이 이 함수를 부르지도 않는데 ModuleNotFoundError로
-    # 죽는다. 실제로 쓰는 지점(이 함수, from-scratch 학습 전용)까지 늦춰서 그 경로를 끊는다.
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    results = model.evals_result_
-    metric = next(iter(next(iter(results.values())).keys()))
-
-    plt.figure(figsize=(8, 5))
-    for name, metrics in results.items():
-        plt.plot(metrics[metric], label=name)
-    plt.axvline(model.best_iteration_, color="gray", linestyle="--", label=f"best_iteration={model.best_iteration_}")
-    plt.xlabel("boosting iteration")
-    plt.ylabel(metric.upper())
-    plt.title("Train vs Valid Learning Curve")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(path)
-    plt.close()
-
 def train() -> lgb.LGBMRegressor:
     df = load_dataset()
     train_df, valid_df = time_based_split(df)
@@ -102,7 +76,6 @@ def train() -> lgb.LGBMRegressor:
         categorical_feature=CATEGORICAL_FEATURES,
         callbacks=[lgb.early_stopping(stopping_rounds=EARLY_STOPPING_ROUND), lgb.log_evaluation(period=200)],
     )
-    plot_learning_curve(model)
 
     pred = model.predict(X_valid, num_iteration=model.best_iteration_)
     mae = mean_absolute_error(y_valid, pred)
