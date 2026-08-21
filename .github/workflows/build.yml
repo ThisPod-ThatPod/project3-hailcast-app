@@ -256,9 +256,17 @@ jobs:
 
           # 대상 목록을 따로 적지 않고 매니페스트를 직접 훑는다.
           # 목록을 두 곳에서 관리하면 한쪽만 고쳐 조용히 누락된다(실제로 call-api 가 그랬다).
+          #
+          # 파일명도 고정하지 않는다. deployment.yaml 만 훑던 때는 CronJob·Job 처럼
+          # 다른 kind 로 들어온 매니페스트가 에러 없이 건너뛰어져, 옛 태그로 계속 돌았다
+          # (retraining-cronjob.yaml 이 그랬다). 아래 두 가드가 파일 종류와 무관하게
+          # 대상을 걸러주므로, 훑는 범위를 넓혀도 안전하다.
+          #   · 우리 ECR 이미지 라인이 없는 파일(service/ingress/rbac/sa/servicemonitor 등)
+          #     → 바로 아래 grep 에서 걸러진다
+          #   · 서비스명은 파일명이 아니라 '디렉터리명' 에서 뽑으므로 그대로 성립한다
           shopt -s nullglob
           updated=0
-          for f in apps/*/deployment.yaml; do
+          for f in apps/*/*.yaml; do
             svc="$(basename "$(dirname "$f")")"
 
             # 우리 ECR 이미지 라인이 없으면 대상이 아니다(사이드카·외부 이미지 등).
