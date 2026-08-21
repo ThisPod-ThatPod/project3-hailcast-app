@@ -4,10 +4,6 @@ from pathlib import Path
 
 import joblib
 import lightgbm as lgb
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
@@ -65,6 +61,15 @@ def time_based_split(df: pd.DataFrame, valid_ratio: float = VALID_RATIO):
 
 
 def plot_learning_curve(model: lgb.LGBMRegressor, path: Path = LEARNING_CURVE_PATH) -> None:
+    # [2026-08-21] matplotlib은 여기서만 쓴다 — 모듈 상단에서 import하면 `from train import
+    # LGBM_PARAMS` 한 줄만으로도 train.py 전체가 실행돼서, matplotlib이 없는 predict 이미지에서
+    # 도는 재학습 CronJob(ml/retrain_trigger.py)이 이 함수를 부르지도 않는데 ModuleNotFoundError로
+    # 죽는다. 실제로 쓰는 지점(이 함수, from-scratch 학습 전용)까지 늦춰서 그 경로를 끊는다.
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
     results = model.evals_result_
     metric = next(iter(next(iter(results.values())).keys()))
 
