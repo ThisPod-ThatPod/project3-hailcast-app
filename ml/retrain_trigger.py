@@ -36,7 +36,10 @@ from features import dataframe_to_features
 from train import LGBM_PARAMS
 
 MIN_RECORDS_FOR_TRAINING = 20   # 이 미만이면 과적합 위험이 커서 기본적으로 학습 안 함
-CONTINUED_N_ESTIMATORS = 30     # 이어학습 시 추가할 트리 수 — 원본(8000)과 별개로 작게 잡는다
+# [2026-08-21 확정, 이창원] 이어학습 시 추가할 트리 수 — 원본(8000)과 별개로 작게 잡는다.
+# MIN_RECORDS_FOR_TRAINING(20건) 규모의 배치에서 과적합을 피하려면 원본만큼 키울 이유가
+# 없다 — 담당자 재량으로 30 확정(팀 별도 논의 없이 종료).
+CONTINUED_N_ESTIMATORS = 30
 REQUIRED_COLUMNS = ["날짜", "요일", "온도", "습도", "강수유무", "승객수"]
 LOCAL_MODEL_PATH = "/tmp/hailcast-current-model.pkl"
 LOCAL_NEW_MODEL_PATH = "/tmp/hailcast-continued-model.pkl"
