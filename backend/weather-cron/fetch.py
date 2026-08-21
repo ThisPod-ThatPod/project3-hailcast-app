@@ -2,6 +2,9 @@
 # Entry Point — 두 가지 실행 모드:
 #   python fetch.py            : FastAPI(:8002) + 백그라운드 Scheduler (Deployment 모드)
 #   python fetch.py --once     : 1회 수집 후 종료 (K8s CronJob 모드)
+#
+# [2026-08-19 CI 검증용 · 기능 영향 없음] GitHub App 설치 토큰으로 이관한 뒤(PR#51)
+# 3번째 검증 테스트 - Action runner 이상 여부 확인
 import asyncio
 import os
 import sys
