@@ -26,6 +26,7 @@ from decimal import Decimal
 import joblib
 import lightgbm as lgb
 import pandas as pd
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from common.aws.client_factory import AwsClientFactory
 from common.aws.dynamodb_adapter import DynamoDbAdapter
@@ -101,7 +102,13 @@ def summarize(items: list[dict], label: str = "오답노트") -> None:
 
 
 def continue_train(items: list[dict], s3: S3Adapter, settings: RetrainTriggerSettings):
-    """S3의 기존 모델을 불러와 오답노트 데이터로 이어학습한다. 새 모델을 반환."""
+    """S3의 기존 모델을 불러와 오답노트 데이터로 이어학습한다. (새 모델, MAE, RMSE)를 반환.
+
+    MAE/RMSE는 학습에 쓴 데이터 자체에 대한 in-sample 지표다 — MIN_RECORDS_FOR_TRAINING(20건)
+    수준의 배치를 또 쪼개 held-out validation을 만들면 몇 건 안 남아 지표 자체가 무의미해진다.
+    일반화 성능 검증용이 아니라, 재학습 회차마다 Grafana에서 추세(급격한 악화 등)를 보기 위한
+    관측 지표로만 쓴다.
+    """
     df = pd.DataFrame(items)
     X = dataframe_to_features(df)
     y = df["승객수"].astype(float)
@@ -116,10 +123,20 @@ def continue_train(items: list[dict], s3: S3Adapter, settings: RetrainTriggerSet
     new_model = lgb.LGBMRegressor(**continued_params)
     new_model.fit(X, y, init_model=base_model.booster_)
     print(f"이어학습 완료 (전체 트리 수: {new_model.booster_.num_trees()})")
-    return new_model
+
+    pred = new_model.predict(X)
+    # float() 캐스팅 필수 — sklearn 지표는 numpy.float64를 반환하는데, S3Adapter.upload_json이
+    # 쓰는 json.dumps는 이를 못 다뤄서 default=str로 빠져 숫자가 아니라 문자열로 직렬화된다
+    # (Grafana가 숫자 메트릭으로 못 읽음).
+    mae = float(mean_absolute_error(y, pred))
+    rmse = float(mean_squared_error(y, pred) ** 0.5)
+    print(f"in-sample MAE={mae:.2f} RMSE={rmse:.2f}")
+    return new_model, mae, rmse
 
 
-def upload_continued_model(model, settings: RetrainTriggerSettings, record_count: int) -> None:
+def upload_continued_model(
+    model, mae: float, rmse: float, settings: RetrainTriggerSettings, record_count: int
+) -> None:
     if not settings.ml_s3_upload_enabled:
         print("ML_S3_UPLOAD_ENABLED=false — S3 업로드 스킵 (로컬 저장만 함)")
         joblib.dump(model, LOCAL_NEW_MODEL_PATH)
@@ -134,9 +151,17 @@ def upload_continued_model(model, settings: RetrainTriggerSettings, record_count
     s3.upload_file(f"{prefix}/model.pkl", LOCAL_NEW_MODEL_PATH)
     s3.upload_json(
         f"{prefix}/metadata.json",
-        {"version": version, "continued_training_records": record_count, "trained_at": version},
+        {
+            "version": version,
+            "continued_training_records": record_count,
+            "trained_at": version,
+            # Grafana(Infinity)가 이 metadata.json을 긁어서 재학습 회차별 추세를 보여준다 —
+            # from-scratch 학습(train.py)이 로컬에서 그리던 학습곡선 PNG를 대신함.
+            "mae": mae,
+            "rmse": rmse,
+        },
     )
-    print(f"S3 업로드 완료 (version={version})")
+    print(f"S3 업로드 완료 (version={version}, mae={mae:.2f}, rmse={rmse:.2f})")
 
 
 def mark_used_as_trained(items: list[dict], dynamodb: DynamoDbAdapter) -> None:
@@ -198,8 +223,8 @@ def main() -> None:
             print("취소됨.")
             return
 
-    model = continue_train(usable, s3, settings)
-    upload_continued_model(model, settings, len(usable))
+    model, mae, rmse = continue_train(usable, s3, settings)
+    upload_continued_model(model, mae, rmse, settings, len(usable))
     mark_used_as_trained(usable, dynamodb)
 
 
