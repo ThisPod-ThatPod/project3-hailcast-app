@@ -41,6 +41,13 @@ MIN_RECORDS_FOR_TRAINING = 20   # 이 미만이면 과적합 위험이 커서 �
 # MIN_RECORDS_FOR_TRAINING(20건) 규모의 배치에서 과적합을 피하려면 원본만큼 키울 이유가
 # 없다 — 담당자 재량으로 30 확정(팀 별도 논의 없이 종료).
 CONTINUED_N_ESTIMATORS = 30
+# [2026-08-21, 이창원] LGBM_PARAMS의 min_data_in_leaf=20을 이어학습에 그대로 물려받으면,
+# 스플릿 한 번에 양쪽 리프가 각각 20개는 있어야 해서 실제로는 배치가 40건을 넘어도(라이브
+# 검증 완료 — 40건에서도 "No further splits with positive gain"으로 트리가 0개 추가됨)
+# 여전히 스플릿이 거의 안 된다. MIN_RECORDS_FOR_TRAINING(20건) 규모 배치를 실제로 반영하려면
+# 훨씬 작아야 한다 — 대신 너무 작으면(1~5 등) 오답노트 개별 건 노이즈에 트리가 과적합될
+# 위험이 커서, "학습이 되긴 하되 소량 표본에 덜 민감한" 절충값으로 8을 잡는다.
+CONTINUED_MIN_DATA_IN_LEAF = 8
 REQUIRED_COLUMNS = ["날짜", "요일", "온도", "습도", "강수유무", "승객수"]
 LOCAL_MODEL_PATH = "/tmp/hailcast-current-model.pkl"
 LOCAL_NEW_MODEL_PATH = "/tmp/hailcast-continued-model.pkl"
@@ -120,6 +127,7 @@ def continue_train(items: list[dict], s3: S3Adapter, settings: RetrainTriggerSet
 
     continued_params = dict(LGBM_PARAMS)
     continued_params["n_estimators"] = CONTINUED_N_ESTIMATORS
+    continued_params["min_data_in_leaf"] = CONTINUED_MIN_DATA_IN_LEAF
     new_model = lgb.LGBMRegressor(**continued_params)
     new_model.fit(X, y, init_model=base_model.booster_)
     print(f"이어학습 완료 (전체 트리 수: {new_model.booster_.num_trees()})")
