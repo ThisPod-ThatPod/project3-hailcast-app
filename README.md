@@ -166,7 +166,7 @@ predict의 `minReplicaCount` Patch(예측 선제)가 **같은 ScaledObject에서
 
 ## Simulator
 
-실서비스와 동일한 `CallRequest` 모델로 현실적인 트래픽을 **k6**로 생성한다(좌표·zone_id 없는 단일 페이로드).
+실서비스와 동일한 `CallRequest` 모델로 현실적인 트래픽을 **k6**로 생성한다(좌표·zone_id 없는 단일 페이로드, B1).
 TPS 변경(`TRAFFIC_STEP` 단위)은 즉시 반영, `MIN_TPS`=0(정지)~`MAX_TPS`=600. `burst`는 큐를 순간적으로
 채워 반응형 스케일링을 확실히 트리거하기 위한 버튼(기본 10000건). 상태는 FileStore(status.json)로 대시보드와 공유.
 
