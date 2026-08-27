@@ -16,6 +16,7 @@ from common.core.metrics import metrics
 
 from config import get_settings
 from dependencies import (
+    get_accuracy_check_scheduler,
     get_backup_scheduler,
     get_database,
     get_forecast_scheduler,
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
         get_scaling_scheduler(),
         get_backup_scheduler(),
         get_traffic_scheduler(),
+        get_accuracy_check_scheduler(),
     ]
     tasks = [
         asyncio.create_task(s.run_loop(), name=s.name) for s in schedulers

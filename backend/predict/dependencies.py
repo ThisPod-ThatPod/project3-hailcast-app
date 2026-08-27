@@ -2,6 +2,7 @@
 from functools import lru_cache
 
 from common.aws.client_factory import AwsClientFactory
+from common.aws.dynamodb_adapter import DynamoDbAdapter
 from common.aws.s3_adapter import S3Adapter
 from common.aws.sqs_adapter import SqsAdapter
 from common.core.store import FileStore
@@ -15,11 +16,14 @@ from adapters.kubernetes_node_adapter import KubernetesNodeAdapter
 from adapters.node_adapter import NodeAdapter
 from config import get_settings
 from ml_runtime.model_loader import ModelLoader
+from schedulers.accuracy_check_scheduler import AccuracyCheckScheduler
 from schedulers.backup_scheduler import BackupScheduler
 from schedulers.forecast_scheduler import ForecastScheduler
 from schedulers.scaling_scheduler import ScalingScheduler
 from schedulers.traffic_scheduler import TrafficScheduler
+from services.accuracy_check_service import AccuracyCheckService
 from services.pod_forecast_service import PodForecastService
+from services.prediction_accuracy_logger import PredictionAccuracyLogger
 from services.prediction_reader import DbPredictionReader, PredictionReader
 from services.prediction_service import PredictionService
 from services.scaler_service import ScalerService
@@ -187,18 +191,56 @@ def get_health_service():
     )
 
 
-# ---------- C10: DynamoDB 오답노트 (2026-07-16, 트리거/필드 설계 미확정 — 배선 보류) ----------
-# 팀 확정되면 아래 주석만 풀면 됨(구현은 services/prediction_accuracy_logger.py에 이미 있음).
-# 확정 후엔 K8S_NODES_ENABLED류 env 플래그(예: PREDICTION_ACCURACY_LOG_ENABLED)로
-# on/off 하는 형태가 될 가능성이 높음 — 지금은 설정값 자체가 없어서 하드코딩 자리표시만 남김.
+# ---------- C10: DynamoDB 오답노트 ----------
+# [2026-08-14] 2026-07-16부터 "트리거/필드 설계 미확정"으로 주석 처리돼 있던 배선을 해제한다.
+# 팀 확정: 트리거는 **수요 기준**(predicted_demand vs 실측 수요) — config.py 주석 참조.
 #
-# @lru_cache
-# def get_dynamodb_adapter() -> DynamoDbAdapter:
-#     settings = get_settings()
-#     factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
-#     return DynamoDbAdapter(factory, table_name="hailcast-dev-prediction-log")  # 인프라 #41
+# [2026-08-19] 호출부(대조 스케줄러) 추가 완료 — AccuracyCheckScheduler/Service가
+# record_if_needed()에 매시 :59분 predicted/actual을 넘긴다(get_accuracy_check_scheduler 참고).
 #
-#
-# @lru_cache
-# def get_prediction_accuracy_logger() -> PredictionAccuracyLogger:
-#     return PredictionAccuracyLogger(get_dynamodb_adapter(), error_ratio_threshold=0.3)  # 임계값 미정, 예시값
+# ⚠️ 운영에서 켜려면 앱 코드만으로는 부족하다 — manifests 레포 apps/predict/deployment.yaml 에
+#    PREDICTION_ACCURACY_LOG_ENABLED env 를 추가해야 실제로 동작한다(이 레포 k8s/ 는 배포 소스가
+#    아니다). 그리고 predict IRSA 에 dynamodb:PutItem 권한이 있어야 put 이 성공한다.
+@lru_cache
+def get_dynamodb_adapter() -> DynamoDbAdapter:
+    settings = get_settings()
+    factory = AwsClientFactory(settings.aws_region, settings.aws_endpoint_url)
+    return DynamoDbAdapter(factory, table_name=settings.prediction_accuracy_table_name)
+
+
+@lru_cache
+def get_prediction_accuracy_logger() -> PredictionAccuracyLogger | None:
+    """플래그가 꺼져 있으면 None — 호출부가 None 체크로 on/off를 판단한다.
+
+    None을 돌려주는 동안에는 get_dynamodb_adapter()가 호출되지 않으므로
+    DynamoDB 클라이언트도, 그에 필요한 IAM 권한도 요구하지 않는다.
+    """
+    settings = get_settings()
+    if not settings.prediction_accuracy_log_enabled:
+        return None
+    return PredictionAccuracyLogger(
+        get_dynamodb_adapter(),
+        error_ratio_threshold=settings.prediction_accuracy_error_ratio_threshold,
+    )
+
+
+@lru_cache
+def get_accuracy_check_service() -> AccuracyCheckService:
+    settings = get_settings()
+    return AccuracyCheckService(
+        get_scaler_service(),
+        get_prediction_reader(),
+        get_file_store(),
+        settings,
+        get_prediction_accuracy_logger(),
+    )
+
+
+@lru_cache
+def get_accuracy_check_scheduler() -> AccuracyCheckScheduler:
+    settings = get_settings()
+    return AccuracyCheckScheduler(
+        get_accuracy_check_service(),
+        settings.accuracy_check_interval_seconds,
+        settings.accuracy_check_align_offset_seconds,
+    )

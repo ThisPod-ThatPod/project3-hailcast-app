@@ -16,7 +16,8 @@ spec:
       containers:
         - name: call-api
           image: <ECR>/hailcast-dev-call-api:<GITHUB_SHA>
-          ports: [{ containerPort: 8000 }]
+          # 포트에 이름을 붙인다 — 아래 Service 의 targetPort 와 ServiceMonitor 가 이 이름을 참조한다.
+          ports: [{ containerPort: 8000, name: http }]
           envFrom:
             - configMapRef: { name: hailcast-config }
             - secretRef: { name: hailcast-rds-secret }
@@ -39,4 +40,8 @@ metadata:
   namespace: hailcast
 spec:
   selector: { app: hailcast-call-api }
-  ports: [{ port: 8000, targetPort: 8000 }]
+  # name: http 는 생략하면 안 된다 — ServiceMonitor 의 endpoints[].port 는 포트 "이름"을
+  # 참조하므로(번호가 아니다), 이름이 없으면 스크레이프 대상이 0개가 된다.
+  # 에러가 아니라 "타겟이 안 잡히는" 형태라 조용히 실패한다.
+  # Ingress 는 포트를 번호(number: 8000)로 참조하므로 이름 추가는 비파괴적이다.
+  ports: [{ name: http, port: 8000, targetPort: http }]

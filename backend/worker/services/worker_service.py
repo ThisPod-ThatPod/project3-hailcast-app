@@ -3,6 +3,7 @@
 # 오류 시 메시지를 삭제하지 않아 Visibility Timeout 후 재수신(재시도)된다. (향후 DLQ 연계)
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from pydantic import ValidationError
 
@@ -50,8 +51,10 @@ class WorkerService:
         while self._running:
             try:
                 self.poll_once()
+                self._touch_heartbeat()
             except AwsError as exc:
                 # 큐 접근 자체가 실패하면 잠시 대기 후 재시도 (루프는 죽지 않는다)
+                # 하트비트는 안 찍는다 — probe가 이걸로 "실제로 안 돌고 있음"을 감지한다.
                 logger.error(
                     f"queue polling failed: {exc.message}",
                     extra={"event": "poll_error"},
@@ -60,6 +63,23 @@ class WorkerService:
 
     def stop(self) -> None:
         self._running = False
+
+    def _touch_heartbeat(self) -> None:
+        """poll_once() 성공마다 호출 — 파일 최신성으로 probe가 실제 동작 여부를 판단한다.
+
+        로컬(docker-compose 등 emptyDir 마운트 없음)에서는 부모 디렉터리가 없을 수
+        있어 실패해도 조용히 넘어간다 — 하트비트는 K8s probe 보조 수단이지 폴링 자체의
+        필수 조건이 아니다.
+        """
+        try:
+            path = Path(self._settings.heartbeat_file_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        except OSError as exc:
+            logger.warning(
+                f"heartbeat file write failed: {exc}",
+                extra={"event": "heartbeat_write_failed"},
+            )
 
     def poll_once(self) -> int:
         """Long Polling 1회 수행. 처리한 메시지 수를 반환한다 (테스트 용이성)."""

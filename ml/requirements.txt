@@ -5,6 +5,5 @@ lightgbm
 scikit-learn
 joblib
 boto3
-matplotlib
 optuna
 optuna-integration[lightgbm]
