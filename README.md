@@ -33,10 +33,11 @@ backend/
   worker/            SQS Long Polling 소비 → RDS 저장 (KEDA 스케일 대상)
   simulator/   :8001 Traffic Engine — start/stop/increase/decrease/reset/burst, k6로 실부하 생성
   weather-cron :8002 Open-Meteo 수집 Scheduler + 조회 API (CronJob 모드: fetch.py --once)
-  predict/     :8003 Forecast·Scaling·Backup·Traffic 스케줄러 + Prediction/Scaling/Dashboard/Health API
+  predict/     :8003 Forecast·Scaling·Backup·Traffic·Accuracy-check 스케줄러 + Prediction/Scaling/Dashboard/Health API
   frontend-contract/ 프론트↔백 응답 계약 문서
 frontend/            React/Vite 대시보드·시뮬레이터 UI (nginx 서빙)
-ml/                  오프라인 학습(LightGBM→S3) + 전처리·배치예측 + 학습·서빙 공유 피처(features.py)
+ml/                  오프라인 학습(LightGBM→S3) + 재학습 CronJob 엔트리(retrain_trigger.py, 오답노트 이어학습) +
+                     전처리·배치예측 + 학습·서빙 공유 피처(features.py)
 k8s/                 배포 계약 예시 manifest (실 배포는 인프라 레포 · GitOps)
 scripts/ · Makefile  로컬 docker compose 관리 + ECR build/push (자세히: scripts/README.md)
 .github/workflows/   CI — 변경 서비스만 빌드 → ECR push → manifests 이미지 태그 자동 갱신
@@ -76,6 +77,8 @@ curl localhost:8003/api/dashboard/summary            # 전체 상태 한 번에
 `dev`/`main` push 시 **변경된 서비스만** 감지해 빌드하고(SHA + latest 태그), OIDC(AssumeRole)로 ECR에 올린 뒤
 manifests 레포의 **실제로 빌드된 서비스** 이미지 태그만 갱신한다 → ArgoCD가 EKS에 반영(GitOps).
 `make build-push`/`make deploy-all` 은 **로컬 수동·디버깅용**이며 운영 배포의 공식 경로가 아니다(계정 가드 선행).
+재학습(`ml/retrain_trigger.py`)은 predict 이미지를 그대로 재사용하는 별도 K8s CronJob(`predict-retraining`,
+매일 03:00 KST, `retraining-sa` 전용 IRSA)으로 배포된다 — predict 배포와 이미지 태그가 항상 같이 갱신된다.
 
 ## API 목록
 
@@ -96,7 +99,7 @@ k8s Probe 와 ALB healthcheck-path 가 이 경로를 직접 보기 때문이다.
 | weather-cron | `GET /weather/status` | 최근 수집 상태·last_error (ALB 미노출 · 접두어 없음) |
 | predict | `GET /api/prediction/latest` `/api/prediction/status` | 예측 조회 |
 | | `GET /api/scaling/status` `/api/scaling/current` | 스케일링 상태·현재 결정 |
-| | `GET /api/dashboard/summary` `/dashboard/traffic-history` `/dashboard/pod-forecast` | 통합 Dashboard |
+| | `GET /api/dashboard/summary` `/api/dashboard/traffic-history` `/api/dashboard/pod-forecast` | 통합 Dashboard |
 | | `GET /health` `/ready` `/live` `/metrics` | 상태·Probe·Prometheus (루트 유지) |
 | 공통 | `GET /healthz` | 서비스별 기본 헬스체크 (루트 유지) |
 
@@ -109,6 +112,7 @@ k8s Probe 와 ALB healthcheck-path 가 이 경로를 직접 보기 때문이다.
 | scaling_scheduler | predict | `SCALING_INTERVAL_SECONDS`=60s | 예측 baseline + 반응형 워터마크 → KEDA Patch |
 | traffic_scheduler | predict | `TRAFFIC_AGGREGATE_INTERVAL_SECONDS`=2s | call-api 파드별 shard 합산(A1) → traffic.json |
 | backup_scheduler | predict | `BACKUP_INTERVAL_SECONDS`=1h | 정시 버킷 파드 이력 스냅샷 (예측-실제 그래프용) |
+| accuracy_check_scheduler | predict | `ACCURACY_CHECK_INTERVAL_SECONDS`=1h (매시 :59분 정렬) | 예측 vs 실측 대조 → 오답노트(DynamoDB) 기록. 재학습 파이프라인 입력(아래 참고) |
 | traffic_flush_scheduler | call-api | `TRAFFIC_FLUSH_INTERVAL_SECONDS`=2s | 이 파드 유입 카운트를 FileStore shard로 flush |
 | status_scheduler | simulator | `STATUS_WRITE_INTERVAL_SECONDS`=2s | 시뮬레이터 상태를 FileStore(status.json)로 기록 |
 
@@ -116,8 +120,8 @@ forecast는 weather-cron과 같은 4시간 주기지만 **3분 늦춰 정렬**(0
 
 ## Prediction (Forecast Pipeline)
 
-S3 latest 모델 로드(버전 캐시, 재학습 자동 반영) → 구역별 최신 날씨(FileStore CSV)+최근 콜이력 →
-`ml/features.py` 공유 피처(train-serve skew 방지) → LightGBM → **서울 9개 구역 × 4시간(1시간 버킷)** 예측 →
+S3 latest 모델 로드(버전 캐시, 재학습 자동 반영) → 뉴욕 날씨(FileStore CSV)+최근 콜이력 →
+`ml/features.py` 공유 피처(train-serve skew 방지) → LightGBM → **뉴욕 날씨 기반 글로벌 수요 × 4시간(1시간 버킷)** 예측 →
 FileStore `predictions/latest.json`(+ latest.csv + 이력). `predicted_taxi_demand`가 Scaling 기준값이다.
 
 ## Predictive Scaling (2계층 · 결과는 KEDA `minReplicaCount` 하나로 합류)
@@ -135,9 +139,34 @@ Down은 `SCALING_COOLDOWN_SECONDS`(기본 300s) 유예. 예측 없음·비정상
 로컬은 `KEDA_ENABLED=false`(dry-run InMemory Adapter). 큐 길이 기반 KEDA SQS 트리거(즉시 반응)와
 predict의 `minReplicaCount` Patch(예측 선제)가 **같은 ScaledObject에서 함께** 동작한다.
 
+## 재학습 파이프라인 (오답노트 → 이어학습)
+
+예측이 크게 틀린 사례(실측이 예측을 초과)를 자동으로 모아뒀다가, 일정량 쌓이면 원본 데이터 없이
+기존 모델에 그 사례만 추가로 학습시킨다. 원본 학습 CSV(`ml/data/`)는 `.gitignore` 대상이라 어떤
+배포 이미지에도 없어서(로컬 전용), from-scratch 재학습은 배포 환경에서 애초에 불가능 — 그래서
+"이미 학습된 모델 + 오답노트만으로 이어서 학습"하는 방식을 쓴다.
+
+1. **오답노트 기록** — `accuracy_check_scheduler`(매시 :59분)가 그 시간의 예측(`predicted_demand`)과
+   실측(`actual_demand`, traffic.json 기준)을 대조. **실측이 예측을 초과하고** 오차비율이
+   `PREDICTION_ACCURACY_ERROR_RATIO_THRESHOLD`(기본 0.3) 이상이면 DynamoDB(`hailcast-dev-prediction-log`)에
+   학습 데이터와 동일한 스키마(날짜·요일·온도·습도·강수유무·승객수)로 기록. 과대예측(비용 손해일 뿐 서비스
+   위험 아님)은 기록 대상이 아니다.
+2. **재학습 트리거** — `ml/retrain_trigger.py`가 학습 미사용(`학습여부=0`) 건수를 확인, `MIN_RECORDS_FOR_TRAINING`(20)건
+   이상이면 이어학습 진행. K8s CronJob(`predict-retraining`, 매일 03:00 KST, `retraining-sa` 전용 IRSA —
+   predict-sa와 분리, `backoffLimit: 0`)로 배포된다. 수동 실행 시 `--yes`(비대화형 확인 스킵) 필수,
+   `--force`는 임계값 미만이어도 강행(파이프라인 검증용, 과적합 위험 있음).
+3. **이어학습** — LightGBM `init_model`로 S3 기존 모델 위에 소수의 트리(`CONTINUED_N_ESTIMATORS`=30)만 추가.
+   소량 배치 특성상 `min_data_in_leaf`도 원본(20)보다 낮춘 `CONTINUED_MIN_DATA_IN_LEAF`(8)를 이어학습 전용으로 씀
+   — 그대로 물려받으면 스플릿 자체가 불가능해서 트리가 하나도 안 늘어나는 조용한 실패가 났던 이력이 있다.
+4. **결과 검증** — 이어학습 전후 트리 수를 비교해서 늘지 않았으면 `RuntimeError`로 Job을 실패시킨다.
+   "fit() 성공"이 "실제로 학습됨"을 보장하지 않는다는 걸 라이브 검증으로 확인했기 때문 — `backoffLimit: 0` +
+   `KubeJobFailed` 경보(인프라)로 실패가 조용히 묻히지 않게 한다.
+5. **재사용 방지** — 학습에 쓴 레코드는 삭제하지 않고 `학습여부`만 0→1로 마킹(UpdateItem, 감사·재현용 보존).
+   MAE/RMSE는 S3 `metadata.json`에 함께 업로드(Grafana 관측용, in-sample 지표 — 일반화 성능이 아니라 회차 간 추세용).
+
 ## Simulator
 
-실서비스와 동일한 `CallRequest` 모델로 서울 9개 구역 가중치 기반 현실적 트래픽을 **k6**로 생성한다.
+실서비스와 동일한 `CallRequest` 모델로 현실적인 트래픽을 **k6**로 생성한다(좌표·zone_id 없는 단일 페이로드, B1).
 TPS 변경(`TRAFFIC_STEP` 단위)은 즉시 반영, `MIN_TPS`=0(정지)~`MAX_TPS`=600. `burst`는 큐를 순간적으로
 채워 반응형 스케일링을 확실히 트리거하기 위한 버튼(기본 10000건). 상태는 FileStore(status.json)로 대시보드와 공유.
 
@@ -160,6 +189,7 @@ node(K8s 노드 수)·health 전체 반환. 부분 장애 시 해당 위젯만 `
 | Scaling (반응형/KEDA) | `TRAFFIC_AGGREGATE_INTERVAL_SECONDS` `SCALING_WATERMARK_HIGH/LOW` `SCALING_REACTIVE_STEP` `KEDA_ENABLED` `KEDA_NAMESPACE` `KEDA_SCALEDOBJECT_NAME` `WORKER_DEPLOYMENT_NAME` |
 | Traffic(sim)/call-api | `CALL_API_URL` `TRAFFIC_STEP` `MIN_TPS` `MAX_TPS` `BURST_DEFAULT_COUNT` `TRAFFIC_FLUSH_INTERVAL_SECONDS` |
 | Dashboard | `K8S_NODES_ENABLED` `K8S_NODES_STUB_COUNT` `HEALTH_QUEUE_BACKLOG_WARNING` `BACKUP_INTERVAL_SECONDS` |
+| 오답노트/재학습 | `PREDICTION_ACCURACY_LOG_ENABLED` `PREDICTION_ACCURACY_TABLE_NAME` `PREDICTION_ACCURACY_ERROR_RATIO_THRESHOLD` `ACCURACY_CHECK_INTERVAL_SECONDS` `ML_S3_UPLOAD_ENABLED`(명시적으로 켜야 재학습 결과가 S3에 반영됨) |
 | 기타 | `LOG_LEVEL` `CORS_ALLOW_ORIGINS` |
 
 Secret은 코드에 하드코딩하지 않는다 — 로컬 compose의 `test`/`hailcast`는 LocalStack/로컬 DB 전용 더미값, 운영은 IRSA + K8s Secret(ESO).
@@ -175,3 +205,5 @@ Secret은 코드에 하드코딩하지 않는다 — 로컬 compose의 `test`/`h
 | 반응형이 안 붙음 | traffic.json 집계 유무 — call-api flush(2s)와 predict 집계(2s) 둘 다 도는지 · 워터마크(0.8/0.4) 도달 여부 |
 | 날씨 수집 실패 | `GET /weather/status`의 `last_error` (Open-Meteo 재시도 3회 후 다음 주기 재시도) |
 | 큐가 계속 쌓임 | worker 수 부족 — KEDA(운영) 또는 `docker compose up -d --scale worker=3`(로컬) |
+| 오답노트가 안 쌓임 | `PREDICTION_ACCURACY_LOG_ENABLED` 켜져 있는지 · 실측이 예측을 초과한 사례가 실제로 있었는지(과대예측은 기록 대상 아님) |
+| 재학습 CronJob 실패 | `kubectl logs job/predict-retraining-*` — `RuntimeError`면 이어학습 트리 수가 안 늘어난 것(배치가 너무 작을 때 의도된 실패) |
